@@ -1,0 +1,620 @@
+---
+title: 'Robust linear models -- preprocessed single omics data'
+author:
+  - Anna Niehues^[Radboud university medical center, Anna.Niehues@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+bibliography: references.bib
+params:
+  config_file: "config.yml"
+---
+
+This R notebook performs robust linear modeling per omics feature (molecualr entity). Robust models [@Huber1981;@Hampel1986;@Marazzi1993;@Venables2022] are implemented using the *R* package `MASS` [@Venables2022].
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$RLM
+dir.create(outdir)
+```
+
+## Read data and metadata: MultiAssayExperiment
+
+The `MultiAssayExperiment` contains preprocessed data and has been created with the R notebook https://gitlab.cmbi.umcn.nl/eatris-plus/mtblm_data_preparation/-/blob/main/R_data_preprocessing/preprocessing_targeted_metabolomics_data/Rmd. Specific assays/experiments used in this analysis are defined below.
+
+```{r read_multiassayexperiment}
+library(MultiAssayExperiment)
+
+mae <- loadHDF5MultiAssayExperiment(
+  dir = config$mae_hdf5_dir_path, 
+  prefix = config$mae_hdf5_prefix)
+mae
+```
+
+The MultiAssayExperiment contains individual targeted metabolomics assays
+
+```{r assays_overview}
+experiments(mae)
+```
+
+Select assays for analysis
+
+```{r}
+assay_names <- config$experiment_names$RLM
+
+# Change to readable (shorter) names
+
+shorter_assay_names <- c(
+  #'Lipidomics (P)',
+  #'Lipidomics (N)',
+  #'aCGH',
+  'VLCFA',
+  'Acylcarnitines',
+  'Amino acids',
+  #'Proteomics',
+  #'mRNA-seq',
+  'miRNA-seq'
+  #'miRNA qRT-PCR'
+  
+)
+
+assay_names_temp <- assay_names
+
+assay_names_df <- data.frame(assay_names_temp, shorter_assay_names)
+#names(assay_names) <- shorter_assay_names
+
+assay_names_df
+
+#names(assay_names) <- assay_names
+```
+
+Technical variables are available per assay
+
+```{r assay_metadata_overview}
+lapply(experiments(mae), function(x) {names(colData(x))})
+```
+
+
+Phenotype information shared across all assays can be accessed via `colData()`
+
+```{r sample_information_overview}
+names(colData(mae))
+```
+
+Add variable that captures both sex and phenotypic feature
+
+```{r}
+# variable describing both Sex and PhenotypicFeature
+colData(mae)$Sex.PhenotypicFeature <- gsub(
+  ".NA", "", paste(colData(mae)$Sex, colData(mae)$PhenotypicFeature, sep = "."))
+```
+
+
+## Feature-wise robust linear models
+
+Feature-wise models using robust regression with `MASS::rlm` [@Huber1981;@Hampel1986;@Marazzi1993;@Venables2022]. For types of models are applied: 
+
+1. Using all samples without covariate
+    * Omics_feature ~ biological_variable
+2. Using all samples, including biological confounder (sex) as covariate
+    * Omics_feature ~ biological_variable + sex
+3. Using samples from male individuals
+    * Omics_feature ~ biological_variable
+4. Using samples from female individuals
+    * Omics_feature ~ biological_variable
+
+The models are applied per biological variable, i.e., phenotype information (age, BMI, etc.) or clinical hematology variable (hemoglobin, lymphocytes, etc.).
+
+Errors can occur when data is very sparse (e.g., miRNA-seq data).
+
+```{r}
+library(MASS)
+library(sfsmisc)
+```
+
+```{r robust_linear_modeling, include = FALSE}
+#' Apply robust linear modeling to one assay and multiple outcome variables
+#'
+#' @param se A SummarizedExperiment from experiments(MultiAssayExperiment).
+#' @param outcomes A character vector with column names present in colData(MultiAssayExperiment).
+#' @param covariates A character vector with column names present in colData(MultiAssayExperiment).
+#' @returns A data frame.
+#' @examples
+#' run_rlm_se(se, outcomes = c("Age", "BMI"), covariates = c("Sex"))
+run_rlm_se <- function(se, outcomes, covariates = NULL) {
+  print(se)
+  # run rlm on SummarizedExperiment
+  require(MASS)
+  require(sfsmisc)
+  # create data frame with omics feature values
+  df <- as.data.frame(t(assays(se)[[1]]))
+  # remove non-variable features
+  print(dim(df))
+  df <- df[, apply(df, 2, function(column) {
+    var(column, na.rm = T) != 0 })]
+  # remove extremely sparse features
+  xpercent <- nrow(df)*0.5
+  df <- df[, apply(df, 2, function(column) {
+    sum(column == 0, na.rm = T) < xpercent })]
+  print(dim(df))
+  features <- colnames(df)
+  # scale and center feature columns
+  #df <- as.data.frame(scale(df, center = T, scale = T))
+  print(head(df))
+  # add biological variables to data frame
+  df <- cbind(df, colData(mae)[rownames(df), ]) 
+  # --> TODO: add mae as parameter and use experiment name to select se
+  # add assay-specific technical variables to data frame
+  df <- cbind(df, colData(se))
+  
+  #' Apply robust linear modeling to one feature and one outcome variable
+  #'
+  #' @param feature A molecule identifier present in rowData(SummarizedExperiment).
+  #' @param df A data frame containing assay data and biological variables.
+  #' @param outcome A character string indicating biological variable column name.
+  #' @param covariates A character string indicating covariate column name.
+  #' @returns A data frame.
+  #' @examples
+  #' run_rlm_df("hmdb:HMDB0000062", df, outcome = "Age", covariates = c("Sex"))
+  run_rlm_df <- function(feature, df, outcome, covariates = NULL) {
+    # run rlm for one feature and one outcome
+    df$y <- df[[feature]]
+    # define formula
+    covar_term <- ""
+    if (!is.null(covariates)) {
+      covar_term <- paste0(" + ", paste0(covariates, collapse = " + "))}
+    str_formula <- paste0("y ~ ", outcome, covar_term)
+    my_formula <- as.formula(str_formula)
+    # fit robust regression model
+    rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+    if (length(rlm_fit) < 2) {
+      message("MASS::rlm error: ", feature, ", ", str_formula)
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = NA, 
+        std.error = NA,
+        t.value = NA,
+        p.value = NA)
+    } else {
+      # robust F-test - Wald test for multiple coefficients of rlm object
+      f_test <- f.robftest(rlm_fit, var = 2) # 1=intercept, 3:=covariates
+      # results
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = summary(rlm_fit)$coefficients[2, "Value"], 
+        std.error = summary(rlm_fit)$coefficients[2, "Std. Error"],
+        t.value = summary(rlm_fit)$coefficients[2, "t value"],
+        p.value = f_test$p.value)
+    }
+  }
+  
+  names(outcomes) <- outcomes
+  
+  rlm_results <- do.call(rbind, lapply(outcomes, function(outcome) {
+    tmp_df <- df
+    if (length(outcome) > 50) {
+          outcome = "All"
+        }
+    else {
+        outcome = outcome
+    }
+    # remove missing values categories
+    if (outcome == "Smoking.Status") {
+      tmp_df <- tmp_df[tmp_df$Smoking.Status != "Unknown If Ever Smoked", ]
+      tmp_df$Smoking.Status <- droplevels(tmp_df$Smoking.Status)
+    }
+   
+    rlm_result_ <- do.call(rbind, lapply(
+      features,
+      run_rlm_df,
+      df = tmp_df, outcome = outcome, covariates = covariates))
+    # adjust p-values
+    rlm_result_$p.adj <- p.adjust(rlm_result_$p.value, method = "BH")
+    rlm_result_$rank <- rank(rlm_result_$p.value)
+    rlm_result_
+  }))
+  rlm_results
+}
+
+
+# outcome variables
+outcomes <- c(
+  "Sex", "Age", "Age.group", 
+  "Height", "Weight", "BMI", "BMI.group", 
+  "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group", 
+  "Leukocytes", "Erythrocytes", "Hemoglobin", "Hematocrit", "Platelets", "MCV", 
+  "MCH", "MCHC", "Lymphocytes", "MXD", "Neutrophils",
+  "Age_pred_BLUP", "Age_acc_BLUP",   "Age_pred_Levine", "Age_acc_Levine")
+
+# TODO: Look at combined outcome if possible
+# Presumably, there are just no significant associations when combing these
+# outcomes <- c(
+#   "Sex", "Age", "Age.group", 
+#   "Height", "Weight", "BMI", "BMI.group", 
+#   "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group", 
+#   "Leukocytes", "Erythrocytes", "Hemoglobin", "Hematocrit", "Platelets", "MCV", 
+#   "MCH", "MCHC", "Lymphocytes", "MXD", "Neutrophils", 
+#   "Sex + Age + Age.group + Height + Weight + BMI + BMI.group + Smoking.Status + ABO.Blood.Group + Rh.Blood.Group +
+#   Leukocytes + Erythrocytes + Hemoglobin + Hematocrit + Platelets + MCV + 
+#   MCH + MCHC + Lymphocytes + MXD + Neutrophils")
+
+write_last_column_smaller <- function(df_input) {
+  df_input$outcome[df_input$outcome == "Sex + Age + Age.group + Height + Weight + BMI + BMI.group + Smoking.Status + ABO.Blood.Group + Rh.Blood.Group +
+  Leukocytes + Erythrocytes + Hemoglobin + Hematocrit + Platelets + MCV + 
+  MCH + MCHC + Lymphocytes + MXD + Neutrophils"] <- "All"
+  return(df_input)
+}
+
+
+# fit robust linear models using different formulas
+mae_rlm_woCovariate <- lapply( # without any covariates
+  experiments(mae)[assay_names], run_rlm_se,
+  outcomes = outcomes)
+
+mae_rlm_wCovarSex <- lapply( # include sex as covariate
+  experiments(mae)[assay_names], run_rlm_se,
+  outcomes = outcomes[outcomes != "Sex"],
+  covariates = c("Sex"))
+
+mae_rlm_woCovariate_m <- lapply( # male only
+  experiments(mae[, colData(mae)$Sex == "MALE", ])[assay_names], 
+  run_rlm_se, 
+  outcomes = outcomes[-which(outcomes %in% c("Sex"))])
+
+mae_rlm_woCovariate_f <- lapply( # female only
+  experiments(mae[, colData(mae)$Sex == "FEMALE", ])[assay_names], 
+  run_rlm_se, 
+  outcomes = outcomes[which(outcomes != "Sex")])
+
+
+# merge all rlm results into one list
+mae_rlm_all <- list(
+  `w/o covariates` = mae_rlm_woCovariate, 
+  `with sex as covariates` = mae_rlm_wCovarSex,
+  `male only, w/o covariates` = mae_rlm_woCovariate_m, 
+  `female only, w/o covariates` = mae_rlm_woCovariate_f)
+```
+
+Print top results
+
+```{r}
+# top 10 features across all outcomes
+lapply(names(mae_rlm_all), function(method_name) {
+  lapply(assay_names, function(assay_name) {
+    rlm_res <- mae_rlm_all[[method_name]][[assay_name]]
+    head(rlm_res[order(rlm_res$p.value, decreasing = FALSE),], n = 3)
+  })
+})
+```
+
+### Visualize results
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+library(ggokabeito) # Okabe-Ito
+```
+
+Plot histograms of p-values per assay
+
+```{r pval_histograms}
+# p-values histograms
+lapply(assay_names, function(assay_name) {
+  lapply(names(mae_rlm_all), function(method_name) {
+    rlm_res <- na.omit(mae_rlm_all[[method_name]][[assay_name]])
+    if (dim(rlm_res)[1] > 0) { # male only, fatty acids, yielded no results in rlm
+      ggplot(rlm_res, aes(x = p.value)) +
+        geom_histogram(aes(fill = p.adj<=0.05), bins = 30) +
+        facet_wrap(vars(outcome)) +
+        scale_color_okabe_ito() + scale_fill_okabe_ito() +
+        ggtitle(stringr::str_wrap(
+          paste0(assay_name, ", robust linear models, ", method_name),
+          width = 60))
+    }
+  })
+})
+```
+
+Volcano plots per phenotypic variable
+
+```{r volcano_plots, fig.width = 11, fig.height = 4.5}
+# volcano plots
+mae_rlm_all_merged <- do.call(
+  rbind, lapply(names(mae_rlm_all), function(method_name) {
+    rlm_res_method <- do.call(rbind, lapply(assay_names, function(assay_name) {
+      rlm_res_ <- mae_rlm_all[[method_name]][[assay_name]]
+      rlm_res_$assay <- assay_name #strsplit(assay_name, "_")[[1]][[2]]
+      
+      if (startsWith(assay_name, "Lipidomics")) {
+        rlm_res_$feature2 <- data.frame(rowData(experiments(mae)[[assay_name]]))[
+          rlm_res_$feature, ][["Name"]]
+      } else {
+        rlm_res_$feature2 <- rlm_res_$feature
+      }
+      # label only significant; limit to top x significant
+      rlm_res_$label <- ifelse((rlm_res_$p.adj<=0.05) & (rlm_res_$rank < 4), 
+                               rlm_res_$feature2, NA)
+      method_split <- strsplit(method_name, " ")
+      rlm_res_$dataset <- apply(rlm_res_, 1, function(x) {
+        if (method_split[[1]][1] == "male") {
+          dat = "male"
+        } else if (method_split[[1]][1] == "female") {
+          dat = "female"
+        } else {
+          dat = "all"
+        }
+        dat
+      })
+      rlm_res_
+    })) 
+  }))
+
+
+lapply(outcomes, function(outcome) {
+  rlm_res <- mae_rlm_all_merged[mae_rlm_all_merged$outcome == outcome, ]
+  rlm_res$method <- stringr::str_wrap(paste(rlm_res$dataset, " | ", rlm_res$formula), width = 20)
+  # my_levels <- unique(rlm_res$method)[order(sapply(unique(rlm_res$method), nchar))]
+  my_levels <- unique(rlm_res$method)[order(unique(rlm_res$method))]
+  rlm_res$method <- factor(rlm_res$method, levels = my_levels)
+  rlm_res$assay <- factor(rlm_res$assay, levels = assay_names)
+  
+  ggp <- ggplot(rlm_res,
+         aes(x = coefficient, y = -log10(p.adj))) +
+    geom_point(aes(col = p.adj<=0.05, shape = p.adj<=0.05), 
+               na.rm = T, size = 1) +
+    scale_color_okabe_ito() + scale_fill_okabe_ito() +
+    facet_grid(assay~method, scales = "free_y") +
+    theme_bw() +
+    theme(strip.text.y = element_text(angle = 0),
+          text = element_text(size = 13),
+          panel.spacing = unit(0.1, "lines")) +
+    geom_text_repel(
+      aes(label = label), size = 2.5, direction = "both",
+      min.segment.length = unit(0.1, "lines"),
+      max.time = 3, max.iter = 1000000) +
+    xlab("Regression coefficient")
+    # ggtitle(stringr::str_wrap(
+    #   paste0("Robust linear models, ", outcome), width = 60))
+  ggsave(file.path(outdir, paste0("RLMvolcano_", outcome, ".png")),
+         ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+  
+  ggp
+})
+```
+
+Compare number (or proportion) of significant hits per omics, outcome variable, and model.
+
+```{r, fig.width=11, fig.height=6.5}
+require(dplyr)
+require(tidyr)
+
+names(mae_rlm_all_merged)
+mae_rlm_all_merged$significant <- mae_rlm_all_merged$p.adj <= 0.05
+mae_rlm_all_merged$method <- as.factor(paste0(
+  mae_rlm_all_merged$dataset, 
+  ifelse(mae_rlm_all_merged$covariates != "", 
+         paste0(" | covariate: ", mae_rlm_all_merged$covariates), 
+         " | no covariate")))
+
+
+# TODO: This should not be used if not using this combined outcome
+#mae_rlm_all_merged <- write_last_column_smaller(mae_rlm_all_merged)
+
+# calculate proportion of significant features per omics, outcome, data set/model
+df <- mae_rlm_all_merged %>%
+  group_by(assay, outcome, method) %>%
+  count(significant, name = "n_signif") %>%
+  group_by(assay, outcome, method) %>%
+  mutate(freq = n_signif / sum(n_signif)) %>%
+  drop_na()
+```
+
+
+## Mannually add EM-seq (NOT FOR REPRODUCIBLE PIPELINE)
+```{r}
+## Mannually add EM-seq##
+
+# beta_values <- read.csv('Z:/Results/2023_12_21/RLM/signif_hits_EMseq_Beta.csv')
+
+df2 <- beta_values %>%
+  group_by(assay, outcome, method) %>%
+  count(significant, name = "n_signif") %>%
+  group_by(assay, outcome, method) %>%
+  mutate(freq = n_signif / sum(n_signif)) %>%
+  drop_na()
+
+df2$freq <- lapply(df2$n_signif, function(x) {
+  freq <- x / 100000 #number of methylation sites
+})
+df2 <- df2[df2$assay == 'EM-seq | cell-type adjusted | 100,000 most variable CpG sites',]
+df2$freq <- as.numeric(as.character(df2$freq))
+df <- rbind(df, df2)
+
+# Merge EM-seq with the rest
+df_emseq_names <- data.frame(colnames(assay_names_df),
+                    c('EM-seq | cell-type adjusted | 100,000 most variable CpG sites', 'EM-seq'))
+```
+
+
+## Plot significant features
+```{r}
+shorter_assay_names <- c(
+  #'Lipidomics (N)',
+  #'Lipidomics (P)',
+  #'aCGH',
+  'VLCFA',
+  'Acylcarnitines',
+  'Amino acids'
+  #'Proteomics',
+  #'mRNA-seq',
+  #'miRNA-seq',
+  #'miRNA qRT-PCR'
+  #'EM-seq'
+)
+
+assay_names_temp <- assay_names
+#assay_names_temp[[10]] <- 'EM-seq | cell-type adjusted | 100,000 most variable CpG sites' #TODO: Is this column still needed? Only for manually adding EM-seq maybe
+
+assay_names_df <- data.frame(assay_names_temp, shorter_assay_names)
+
+# Add shorter names
+shorter_names <- lapply(df$assay, function(x) {
+    new_name <- assay_names_df[assay_names_df$assay_names_temp == x, 2]
+    new_name
+}) 
+df$assay <- shorter_names
+
+
+
+#df$assay_short <- factor(df$assay_short, levels = assay_names)
+df$assay <- factor(df$assay, levels = unique(shorter_names))
+df$outcome <- factor(df$outcome, levels = outcomes)
+df$`Dataset | model` <- factor(df$method, levels = c(
+  "all | no covariate", "all | covariate: Sex",
+  "female | no covariate", "male | no covariate"
+))
+
+omics_labels <- sapply(assay_names_df$shorter_assay_names, function(x) {
+    long_name <- assay_names_df[assay_names_df$shorter_assay_names == x, 1]
+    label <- paste0(x, '\n', dim(mae[[long_name]])[1], ' features')
+    label
+})
+
+# Remove aging outcomes
+df_non_aging <- df[!(df$outcome %in% c("Age_pred_BLUP", "Age_acc_BLUP",   "Age_pred_Levine", "Age_acc_Levine")), ]
+
+
+ggp <- ggplot(df_non_aging[df_non_aging$significant == T, ]) + 
+  geom_col(aes_string(
+    x = "`Dataset | model`", y = "freq", fill = "`Dataset | model`"),
+    position = "dodge") + #position_dodge2(0.9, preserve = "total")) +
+  facet_grid(rows = vars(assay), cols = vars(outcome), labeller=labeller(.rows=omics_labels)) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), #element_text(angle = 90, vjust = 0.5, hjust = 1),
+        strip.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0),
+        axis.title.x = element_blank(),
+        panel.spacing = unit(0, "lines"),
+        legend.position = "bottom",
+        text = element_text(size = 13)) +
+  scale_fill_okabe_ito(order = c(1, 3, 7, 5)) +
+  scale_y_continuous(
+    name = stringr::str_wrap(
+      "Proportion of significantly associated omics features",
+      width = 30),
+    breaks = seq(0, 0.5, 0.1),
+    labels = c("", "0.1", "", "", "", "0.5"))
+
+
+dir.create(outdir)
+ggsave(file.path(outdir, "RLMproportion_signif_hits.png"), ggp,
+       width = 28.04, height = 20.46, units = "cm", dpi = 300)
+
+ggp
+
+# Save dataframe with significant hits
+write.csv(df, file.path(outdir, "signif_hits.csv"))
+  
+```
+
+### Aging
+```{r}
+df_aging <- df[grep(paste('Age', collapse = "|"),  df$outcome), ]
+
+ggp <- ggplot(df_aging[df_aging$significant == T, ]) + 
+  geom_col(aes_string(
+    x = "`Dataset | model`", y = "freq", fill = "`Dataset | model`"),
+    position = "dodge") + #position_dodge2(0.9, preserve = "total")) +
+  facet_grid(rows = vars(assay), cols = vars(outcome), labeller=labeller(.rows=omics_labels)) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), #element_text(angle = 90, vjust = 0.5, hjust = 1),
+        strip.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0),
+        axis.title.x = element_blank(),
+        panel.spacing = unit(0, "lines"),
+        legend.position = "bottom",
+        legend.title=element_text(size=8),
+        legend.text=element_text(size=8),
+        text = element_text(size = 13)) +
+  scale_fill_okabe_ito(order = c(1, 3, 7, 5)) +
+  scale_y_continuous(
+    name = stringr::str_wrap(
+      "Proportion of significantly associated omics features",
+      width = 30),
+    breaks = seq(0, 0.5, 0.1),
+    labels = c("", "0.1", "", "0.3", "", "")) #+ 
+  ylim(c(0,0.2))
+
+dir.create(outdir)
+ggsave(file.path(outdir, "RLMproportion_signif_hits_Aging.png"), ggp,
+       width = 18.04, height = 18.46, units = "cm", dpi = 300)
+
+ggp
+
+# Save dataframe with significant hits
+write.csv(df_aging, file.path(outdir, "signif_hits_aging.csv"))
+```
+
+
+### Findings per outcome
+
+Plot selected features
+
+```{r}
+library(tidyr)
+library(dplyr)
+ 
+mae_rlm_all_merged %>%
+  filter(p.adj<=0.05 & rank<=6) %>%
+  filter(dataset == "all") %>%
+  group_by(feature, outcome, assay) %>%
+  count(name = "n_signif") %>%
+  filter(n_signif > 1 | outcome == "Sex")
+```
+
+
+
+## Signifant featureas after p-adjustement on ALL features with all models
+```{r}
+mae_rlm_all_merged$p.adj_all <- p.adjust(mae_rlm_all_merged$p.adj, method = 'BH')
+
+mae_rlm_all_merged %>%
+  filter(p.adj_all<=0.05 & rank<=6) %>%
+  filter(dataset == "all") %>%
+  group_by(feature, outcome, assay) %>%
+  count(name = "n_signif") %>%
+  filter(n_signif > 1 | outcome == "Sex")
+```
+
+
+## Save Dataframe with significant hits
+```{r}
+signif_hits <- mae_rlm_all_merged[mae_rlm_all_merged$p.adj < 0.05,]
+signif_hits_adjusted_all <- mae_rlm_all_merged[mae_rlm_all_merged$p.adj_all < 0.05,]
+
+
+# Save dataframe with significant hits
+write.csv(signif_hits, file.path(outdir, "signif_hits.csv"))
+write.csv(signif_hits_adjusted_all, file.path(outdir, "signif_hits_adj_all.csv"))
+
+```
+
+## Session information
+
+```{r}
+sessionInfo()
+```
+
+## References
+

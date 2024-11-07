@@ -1,0 +1,905 @@
+---
+title: 'Multi-omics Factor Analysis (MOFA)'
+author:
+- Anna Niehues^[Radboud university medical center, Anna.Niehues@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+bibliography: references.bib
+params:
+  config_file: "config.yml"
+---
+
+This notebook performs Multi-omics Factor Analysis (MOFA) [@Argelaguet2018,@Argelaguet2020] on preprocessed data. 
+
+MOFA is an unsupervised method that uncovers main sources of variation in multi-omics data. It allows to identify variation shared across omics data types or specific to individual omics data types. 
+Subsequent to MOFA, correlation between MOFA factors and phenotypic information is determined to identify possible biological factors contributing to the observed variation.
+
+
+```{r show_parameters}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$MOFA
+dir.create(outdir)
+```
+
+
+
+
+## Read input data
+
+Input data is a MultiAssayExperiment (MAE) object. All or specified assays in the MAE will be used for analysis Multi-omics Factor Analysis (MOFA).
+
+```{r read_input_data, message=FALSE}
+library(MultiAssayExperiment)
+library(HDF5Array)
+
+mae <- loadHDF5MultiAssayExperiment(dir = config$mae_hdf5_dir_path, 
+                                    prefix = config$mae_hdf5_prefix)
+```
+
+Select male/female individuals based on input parameters
+
+```{r select_input_samples}
+sample_selection <- c()
+if (config$sample_selection$include_MALE) {
+  sample_selection <- c(sample_selection, "MALE")}
+if (config$sample_selection$include_FEMALE) {
+  sample_selection <- c(sample_selection, "FEMALE")}
+
+mae <- mae[, colData(mae)$Sex %in% sample_selection]
+
+mae
+```
+
+
+### Merge metabolomics, merge lipidomics
+
+Assays are merged so that they can be used as single modality in MOFA
+
+```{r merge_selected_omics}
+# # merge se
+# mtblms_se <- list(mae[["Amino acids"]], mae[["Acylcarnitines"]],
+#                   mae[["Very long chain fatty acids"]])
+# mtblms_se <- lapply(mtblms_se, function(se) {
+#   rowdata_df <- data.frame(rowData(se))
+#   if (!"HMDB.ID.s." %in% names(rowdata_df)) {
+#     rowdata_df$HMDB.ID.s. <- NA
+#   }
+#   se <- SummarizedExperiment(assays = assays(se), rowData = rowdata_df)
+# })
+# se_metabolomics <- do.call(rbind, mtblms_se)
+# mae <- c(mae, `Metabolomics` = se_metabolomics)
+# 
+# # merge se
+# lpdms_se <- list(mae[["Lipidomics, positive"]], mae[["Lipidomics, negative"]])
+# lpdms_se <- lapply(lpdms_se, function(se) {
+#   rowdata_df <- data.frame(rowData(se))
+#   if (!"RT.sec." %in% names(rowdata_df)) {
+#     rowdata_df$RT.sec. <- NA
+#   }
+#   se <- SummarizedExperiment(assays = assays(se), rowData = rowdata_df)
+# })
+# se_lipidomics <- do.call(rbind, lpdms_se)
+# mae <- c(mae, `Lipidomics` = se_lipidomics)
+```
+
+### Experiment selection
+
+Omics types to be included in MOFA, selected from the config.yml file.
+
+```{r get_assay_names}
+# To mannually select data types:
+
+#experiments(mae)
+
+# assay_names <- c("Metabolomics", "Lipidomics", "Proteomics")
+
+# assay_names <- c(
+#    "Lipidomics, positive",
+#    "Lipidomics, negative",
+#    # "Very long chain fatty acids",
+#    "Very long chain fatty acids | batch-adjusted ",
+#    # "Acylcarnitines | with missing values",
+#    "Acylcarnitines | batch-adjusted | with missing values",
+#    # "Acylcarnitines | batch-adjusted | imputed missing values",
+#    # "Amino acids | with missing values",
+#    "Amino acids | batch-adjusted | with missing values",
+#    # "Amino acids | batch-adjusted | imputed missing values",
+#    "Proteomics | with missing values",
+#    # "Proteomics | imputed missing values",
+#    # "mRNA-seq",
+#    # "miRNA-seq, mature",
+#    # "miRNA-seq, hairpin",
+#    # "miRNA qRT-PCR",
+#    # "EM-seq | 100,000 random CpG sites"
+#    # "EM-seq | 100,000 most variable CpG sites"
+#    "EM-seq | cell-type adjusted | 100,000 random CpG sites"
+#    # "EM-seq | cell-type adjusted | 100,000 most variable CpG sites"
+# )
+
+assay_names <- config$experiment_names$MOFA
+names(assay_names) <- assay_names
+```
+
+
+## Change to readable omics names
+```{r}
+
+# Change to readable (shorter) names
+
+shorter_assay_names <- c(
+  'Lipidomics (P)',
+  #'Lipidomics (N)',
+  #'aCGH',
+  'VLCFA',
+  'Acylcarnitines',
+  'Amino acids',
+  'Proteomics',
+  'mRNA-seq',
+  'miRNA-seq',
+  'miRNA qRT-PCR',
+  'EM-seq'
+)
+
+assay_names_temp <- assay_names
+
+assay_names_df <- data.frame(assay_names_temp, shorter_assay_names)
+#names(assay_names) <- shorter_assay_names
+
+assay_names_df
+```
+
+
+## Multi-omics factor analysis (MOFA)
+
+For running MOFA, it is recommended to first remove known batch effects. 
+Make sure to use input data that were adjusted for batch effect if necessary.
+
+```{r load_mofa, message=FALSE}
+library(MOFA2)
+library(data.table)
+```
+
+Prepare MOFA input data: create a long data frame with sample, feature, view, 
+[group], and value. 
+
+```{r functions_for_mofa_input, message=FALSE}
+library(tidyr)
+library(dplyr)
+
+#' Convert omics data to long format
+wide_to_long_keep_samples <- function(df) {
+  df$sample <- rownames(df)
+  gather(df, key = "feature", value = "value", -sample, factor_key = TRUE)
+}
+
+#' Prepare MultiAssayExperiment for MOFA
+#' If both hematology and phenotype data are selected, they are merged to one data modality.
+#'
+#' @param mae A MultiAssayExperiment.
+#' @param hematology A boolean indicating whether to include clinical hematology as data modality in MOFA. 
+#' @param phenotype A boolean indicating whether to include additional phenotype information as data modality in MOFA.
+#' @param assay_selection An optional character vector with assay names to be included in analysis.
+#' @returns A long data frame.
+mae_to_MOFAinput <- function(mae, 
+                             hematology = TRUE, 
+                             phenotype = TRUE, 
+                             assay_selection = NULL) {
+  if (is.null(assay_selection)) {
+    # use all assays from MAE MultiAssayExperiment 
+    assay_names <- names(assays(mae))
+  } else {
+    assay_names <- assay_selection
+  }
+  names(assay_names) <- assay_names
+  
+  # get omics data from SummarizedExperiments
+  assay_list <- lapply(assay_names, function(assay_name) {
+
+    se <- mae[[assay_name]]
+    df_wide <- data.frame(t(assay(se)))
+ 
+    
+
+    # standardize data
+    df_wide <- as.data.frame(t(scale(t(df_wide), center = TRUE, scale = TRUE)))
+    
+    # convert wide to long data frame
+    df_long <- wide_to_long_keep_samples(df_wide)
+    # shorten assay name of targeted metabolomics assays
+    assay_shortname <- ifelse(
+      grepl("_metabolite_profiling", assay_name),
+      strsplit(assay_name, "_")[[1]][2],
+      assay_name)
+    df_long$view <- assay_shortname
+    df_long
+  }) 
+  merged_assay_data <- do.call(rbind, assay_list)
+  
+  # phenotype and hematology data
+  phenotype_vars <- c("Age", "BMI", "Height", "Weight")
+  hematology_vars <- c("Leukocytes", "Erythrocytes", "Hemoglobin", "Hematocrit",
+                       "Platelets", "MCV", "MCH", "MCHC", "Lymphocytes", "MXD",
+                       "Neutrophils")
+  additional_vars <- c()
+  if (hematology) {
+    additional_vars <- c(additional_vars, hematology_vars)
+  }
+  if (phenotype) {
+    additional_vars <- c(additional_vars, phenotype_vars)
+  }
+  if (length(additional_vars) > 0) {
+    phenotype_data <- colData(mae)[, additional_vars]
+    phenotype_data <- as.data.frame(phenotype_data)
+    # log-transform hematology variables
+    if (hematology) {
+      phenotype_data[, hematology_vars] <- log(
+        phenotype_data[, hematology_vars] + 1)
+      # standardize
+      phenotype_data <- as.data.frame(scale(
+        phenotype_data, center = TRUE, scale = TRUE))
+    }
+    phenotype_data_long <- wide_to_long_keep_samples(phenotype_data)
+    phenotype_data_long$view <- "Hematology"
+    
+    merged_assay_data <- rbind(merged_assay_data, phenotype_data_long)
+  }
+  merged_assay_data
+}
+
+```
+
+
+```{r prepare_mofa_input}
+mofa_input <- mae_to_MOFAinput(
+  mae, 
+  config$additional_data_types$include_hematology, 
+  config$additional_data_types$include_phenotype,
+  assay_selection = assay_names)
+
+if (config$additional_data_types$include_hematology) {
+  mofa_input$view <- factor(mofa_input$view, levels = c(
+       "Hematology", assay_names))
+} else {
+  mofa_input$view <- factor(mofa_input$view, levels = assay_names)
+}
+
+# mofa_input$view <- factor(mofa_input$view, levels = c(
+#      "Hematology", "Metabolomics", "Lipidomics", "Proteomics"))
+
+shorter_names <- lapply(mofa_input$view, function(x) {
+    new_name <- assay_names_df[assay_names_df$assay_names_temp == x, 2]
+    new_name
+}) 
+mofa_input$view <- as.character(shorter_names)
+```
+
+Create the MOFA object
+
+```{r create_mofa_object}
+MOFAobject <- create_mofa(mofa_input)
+print(MOFAobject)
+```
+
+Plot views available in MOFA object (N = number of samples, D = number of 
+features per view)
+
+```{r show_mofa_modalities}
+require(ggplot2)
+ggp <- plot_data_overview(MOFAobject)
+
+ggsave(file.path(outdir, "MOFA_modality_overview.png"), 
+       ggp, width = 15, height = 10.46, units = "cm", dpi = 300)
+
+ggp
+```
+
+
+Get parameters of MOFA object
+
+```{r}
+data_opts <- get_default_data_options(MOFAobject)
+data_opts$scale_views <- TRUE
+data_opts
+```
+
+Set number of factors. This parameter can have a large impact on the results.
+
+```{r}
+model_opts <- get_default_model_options(MOFAobject)
+model_opts$num_factors <- config$num_MOFA_factors
+model_opts
+```
+
+
+```{r}
+train_opts <- get_default_training_options(MOFAobject)
+train_opts
+```
+
+Prepare MOFA object for training using the parameters specified above
+
+```{r}
+MOFAobject <- prepare_mofa(
+  object = MOFAobject,
+  data_options = data_opts,
+  model_options = model_opts,
+  training_options = train_opts
+)
+```
+
+
+**NOTE:** `mofa2` requires a Python installation with `mofapy2`
+
+`mofapy2` can be installed from PyPi using conda:
+
+```
+conda create -n mofapy2 python pip
+conda activate mofapy2
+pip install mofapy2
+```
+
+In case of computing environments without internet access, the conda environment 
+can be created on a computer with internet and pip dependencies for `mofapy2` 
+can be downloaded:
+
+```
+pip list --format=freeze > requirements.txt
+pip download -r requirements.txt
+```
+
+After uploading the dependencies to the environment without internet access, 
+`mofapy2` can be installed with pip defining the path to the package wheel:
+
+```
+pip install --no-index --find-links Z:/software/pip Z:/software/pip/mofapy2-0.6.7-py3-none-any.whl
+```
+
+The conda environment with Python can now be used by `reticulate` in R.
+
+```{r define_python_version}
+reticulate::use_condaenv(condaenv = "mofapy")
+```
+
+Train the MOFA model
+
+```{r run_mofa, message=FALSE}
+outfile = file.path(tempdir(), "model.hdf5")
+MOFAobject.trained <- run_mofa(MOFAobject, outfile)
+```
+
+
+## Visualizations of MOFA results 
+
+
+### Variance decomposition
+
+Amount of variance explained per modality (= view, = assay)
+
+```{r}
+head(MOFAobject.trained@cache$variance_explained$r2_total)
+```
+
+Amount of variance explained by each factor per modality
+
+```{r}
+head(MOFAobject.trained@cache$variance_explained$r2_per_factor)
+```
+
+Plot amount of variance explained by each factor per modality
+
+```{r}
+library(ggplot2)
+
+expl_var <- c(
+  get_variance_explained(MOFAobject.trained)$r2_per_factor$single_group)
+
+ggp <- plot_variance_explained(MOFAobject.trained) +
+  geom_text(
+    label = round(expl_var, 2),
+    color = ifelse(expl_var < 0.6*max(expl_var), "black", "white")) +
+  theme(
+    axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1)
+  )
+      
+
+ggsave(file.path(outdir, "MOFA_explained_variance.png"), 
+       ggp, width = 14, height = 10.46, units = "cm", dpi = 300)
+
+ggp
+```
+
+###  Factor correlations
+
+Plot correlations between factors. When factors are correlated (containing 
+redundant information) it is recommended to reduce the number of factors
+
+```{r}
+plot_factor_cor(MOFAobject.trained)
+```
+
+### Factor weights
+
+Plot feature weights per factor and assay
+
+```{r}
+num_factors <- nrow(
+  MOFAobject.trained@cache$variance_explained$r2_per_factor[[1]])
+view_names <- names(MOFAobject.trained@data)
+
+lapply(1:5, function(f) {
+  lapply(view_names, function(a) {
+    plot_weights(
+      MOFAobject.trained,
+      view = a,
+      factor = f,
+      nfeatures = 10
+      )+ ggtitle(paste0(a))
+  }) 
+})
+```
+
+Top weights per factor and assay
+
+```{r}
+lapply(1:5, function(f) { 
+  lapply(view_names, function(a) {
+    plot_top_weights(
+      MOFAobject.trained,
+      view = a,
+      factor = f,
+      nfeatures = 10
+    ) + ggtitle(paste0(a))
+  })
+})
+```
+
+
+### Correlation of factor scores with continuous phenotype variables
+
+Add metadata for plotting results
+
+```{r}
+require(dplyr)
+
+mofa_metadata <- as.data.frame(colData(mae)) %>%
+  rename(sample = subject.id) %>%
+  mutate(Sex.PhenotypicFeature = paste(
+    as.character(Sex), 
+    ifelse(is.na(PhenotypicFeature), "", 
+           paste0("_", as.character(PhenotypicFeature))), 
+    sep = "")) %>%
+  select(c("sample", "Sex", "Sex.PhenotypicFeature", "Age.group", "BMI.group", 
+           "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group", 
+           "PhenotypicFeature", "Genomic_Abberation"))
+
+samples_metadata(MOFAobject.trained) <- mofa_metadata
+```
+
+
+```{r}
+library(ggcorrplot)
+library(psych)
+```
+
+```{r}
+# get data
+mofa_factors <- get_factors(MOFAobject.trained)$single_group
+continuous_phenotype_data <- as.data.frame(
+  colData(mae))[, c("Age", "Height", "Weight", "BMI",
+                    "Leukocytes", "Erythrocytes", "Hemoglobin", "Hematocrit",
+                    "Platelets", "MCV", "MCH", "MCHC", "Lymphocytes", "MXD",
+                    "Neutrophils" #, "Age_pred_BLUP", "Age_acc_BLUP", "Age_pred_Levine", "Age_acc_Levine"
+                    )]
+
+# calculate Spearman correlation
+mofa_factor_phenotype_cor <- cor(
+  continuous_phenotype_data,
+  mofa_factors, 
+  use = 'pairwise.complete.obs', 
+  method = "spearman")
+
+# calculate FDR-adjusted p-values
+mofa_factor_phenotype_sigtest = psych::corr.test(
+  continuous_phenotype_data,
+  mofa_factors, 
+  use = 'pairwise', 
+  method = "spearman",
+  adjust = "BH"
+)
+
+# correlation plot
+ggp <- ggcorrplot(
+  mofa_factor_phenotype_cor, 
+  hc.order = FALSE,
+  p.mat = mofa_factor_phenotype_sigtest$p.adj) 
+
+minmax <- max(abs(c(
+  min(mofa_factor_phenotype_cor), max(mofa_factor_phenotype_cor)
+)))
+minmax <- ifelse(
+  round(minmax, 1) < minmax, round(minmax+0.1, 1), round(minmax, 1))
+ggp <- ggp + scale_fill_gradient2(
+  limit = c(-minmax, minmax), 
+  low = "blue", high = "red", mid = "white", midpoint = 0
+)
+
+ggsave(file.path(outdir, 
+                 "MOFA_factors_vs_continuous.png"), 
+       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+ggp
+```
+
+
+### Correlation with aCGH sum
+```{r, acgh}
+acgh_sums <- read.csv('Z:/omics/aCGH_IMTM/aCGH_sums.csv', row.names = 1)
+sums <- lapply(rownames(continuous_phenotype_data), function(x) {
+    
+    if (x %in% rownames(acgh_sums)) {
+        sum <- acgh_sums[x, 1]
+    }
+    else {
+        sum <- NA
+    }
+    sum
+})
+continuous_phenotype_data$aCGH_sums <- as.character(sums)
+continuous_phenotype_data$aCGH_sums[continuous_phenotype_data$aCGH_sums == 'NA'] <- NA
+continuous_phenotype_data$aCGH_sums <- as.numeric(sums)
+
+# calculate Spearman correlation
+mofa_factor_phenotype_cor <- cor(
+  continuous_phenotype_data,
+  mofa_factors, 
+  use = 'pairwise.complete.obs', 
+  method = "spearman")
+
+# calculate FDR-adjusted p-values
+mofa_factor_phenotype_sigtest = psych::corr.test(
+  continuous_phenotype_data,
+  mofa_factors, 
+  use = 'pairwise', 
+  method = "spearman",
+  adjust = "BH"
+)
+
+ggp <- ggcorrplot(
+  mofa_factor_phenotype_cor, 
+  hc.order = FALSE,
+  p.mat = mofa_factor_phenotype_sigtest$p.adj) 
+
+minmax <- max(abs(c(
+  min(mofa_factor_phenotype_cor), max(mofa_factor_phenotype_cor)
+)))
+minmax <- ifelse(
+  round(minmax, 1) < minmax, round(minmax+0.1, 1), round(minmax, 1))
+ggp <- ggp + scale_fill_gradient2(
+  limit = c(-minmax, minmax), 
+  low = "blue", high = "red", mid = "white", midpoint = 0
+)
+
+ggsave(file.path(outdir, 
+                 "MOFA_factors_vs_continuous_aCGH.png"), 
+       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+ggp
+```
+
+### MOFA Factors vs Predicted Age
+
+```{r}
+continuous_phenotype_data <- as.data.frame(
+  colData(mae))[, c("Age", "Age_pred_BLUP", "Age_acc_BLUP", "Age_pred_Levine", "Age_acc_Levine"
+                    )]
+
+# Convert to numericals
+continuous_phenotype_data$Age_acc_Levine <- as.numeric(continuous_phenotype_data$Age_acc_Levine)
+continuous_phenotype_data$Age_acc_BLUP <- as.numeric(continuous_phenotype_data$Age_acc_BLUP)
+continuous_phenotype_data$Age_pred_Levine <- as.numeric(continuous_phenotype_data$Age_pred_Levine)
+continuous_phenotype_data$Age_pred_BLUP <- as.numeric(continuous_phenotype_data$Age_pred_BLUP)
+
+# calculate Spearman correlation
+mofa_factor_phenotype_cor <- cor(
+  continuous_phenotype_data,
+  mofa_factors,
+  use = 'pairwise.complete.obs',
+  method = "spearman")
+
+# calculate FDR-adjusted p-values
+mofa_factor_phenotype_sigtest = psych::corr.test(
+  continuous_phenotype_data,
+  mofa_factors,
+  use = 'pairwise',
+  method = "spearman",
+  adjust = "BH"
+)
+
+# correlation plot
+ggp <- ggcorrplot(
+  mofa_factor_phenotype_cor,
+  hc.order = FALSE,
+  p.mat = mofa_factor_phenotype_sigtest$p.adj)
+
+minmax <- max(abs(c(
+  min(mofa_factor_phenotype_cor), max(mofa_factor_phenotype_cor)
+)))
+minmax <- ifelse(
+  round(minmax, 1) < minmax, round(minmax+0.1, 1), round(minmax, 1))
+ggp <- ggp + scale_fill_gradient2(
+  limit = c(-minmax, minmax),
+  low = "blue", high = "red", mid = "white", midpoint = 0
+)
+
+ggsave(file.path(outdir,
+                 "MOFA_factors_vs_Age.png"),
+       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+ggp
+```
+
+
+### Distributions of sample factor scores per phenotype category
+
+#### Age
+
+```{r}
+library(ggpubr)
+library(rstatix)
+library(ggokabeito)
+
+plot_factor_category <- function(MOFAobject.trained, 
+                                 var, 
+                                 excluded_categories = c(),
+                                 num_factors = NULL,
+                                 first_factor = 1,
+                                 last_factor = 4,
+                                 legend_position = "none") {
+    
+  if (is.factor(MOFAobject.trained@samples_metadata[[var]])) {
+    original_categories <- levels(MOFAobject.trained@samples_metadata[[var]])
+  } else {
+    original_categories <- levels(
+      as.factor(MOFAobject.trained@samples_metadata[[var]]))
+  }
+  
+  categories <- original_categories[
+    !original_categories %in% excluded_categories]
+  if (length(categories) > 1) {
+    comparisons <- as.list(as.data.frame(combn(categories, 2)))
+  }
+  
+  num_factors <- ifelse(
+    is.null(num_factors),
+    nrow(MOFAobject.trained@cache$variance_explained$r2_per_factor[[1]]),
+    num_factors)
+  
+  ggp <- plot_factor(
+    MOFAobject.trained,
+    #factor = first_factor:last_factor, # TODO
+    factor = c(first_factor, last_factor),
+    color_by = var,
+    dodge = TRUE,
+    add_boxplot = TRUE) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+          panel.spacing = unit(0, "lines"),
+          legend.position = legend_position) 
+  
+  ggp$data$group_by <- ggp$data$color_by
+  
+  add_stat <- TRUE
+  if (length(categories) > 2) {
+    # kruskal wallis
+    stat_method <- "Kruskal-Wallis"
+    stat_test <- ggp$data %>%
+      filter(!color_by %in% excluded_categories) %>%
+      group_by(factor) %>%
+      kruskal_test(value ~ group_by) %>%
+      adjust_pvalue(method = "fdr") 
+    
+    stat_test_pairwise <- ggp$data %>%
+      filter(!color_by %in% excluded_categories) %>%
+      group_by(factor) %>%
+      dunn_test(value ~ group_by, p.adjust.method = "fdr") %>%
+      add_y_position()
+  } else if (length(categories) == 2) {
+    # wilcoxon
+    stat_method <- "Wilcoxon"
+    stat_test <- stat_test_pairwise <- ggp$data %>%
+      group_by(factor) %>%
+      wilcox_test(value ~ group_by, comparisons = comparisons) %>%
+      adjust_pvalue(method = "fdr") %>%
+      add_significance() %>%
+      add_y_position()
+  } else {
+    add_stat <- FALSE
+  }
+  if (add_stat) {
+    test_label <- apply(stat_test, 1, function(row) {
+      paste0("p.adj=\n", scales::scientific(as.numeric(row[["p.adj"]]))) 
+    })
+    
+  
+  ggp <- ggp + 
+    stat_pvalue_manual(stat_test_pairwise, label = "p.adj.signif") +
+    labs(subtitle = stat_method)
+  
+  x.range <- ggplot_build(ggp)$layout$panel_params[[1]]$x.range
+  y.range <- ggplot_build(ggp)$layout$panel_params[[1]]$y.range
+  ggp <- ggp + 
+    geom_text(data = data.frame(factor = stat_test$factor), 
+              aes(x = x.range[1] + (x.range[2]-x.range[1])/2, 
+                  y = y.range[2] + 0.06*(y.range[2]-y.range[1]), 
+                  color = NULL, group = NULL, group_by = NULL), 
+              label = test_label, size = 3)
+  }
+  
+  ggp <- ggp + scale_fill_okabe_ito(
+    breaks = original_categories,
+    labels = original_categories)
+  ggp
+}
+```
+
+## Pick signficant differences for manuscript figure
+```{r}
+
+library(gridExtra)
+ggp_sex <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", first_factor =  1, last_factor =  6, legend_position = 'right')
+ggp_age <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  9, last_factor = 10 , legend_position = 'right')
+ggp_bmi <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  1, last_factor =  2, legend_position = 'right')
+
+grob1 <- ggplotGrob(ggp_sex)
+grob2 <- ggplotGrob(ggp_age)
+grob3 <- ggplotGrob(ggp_bmi)
+
+pdf("MOFA_factors_Significants.pdf", width = 14, height = 5)
+grid.arrange(grob1, grob2, grob3, ncol = 3)
+dev.off()
+```
+
+
+
+```{r, fig.width=16, fig.height=5}
+library(gridExtra)
+
+ggp <- plot_factor_category(MOFAobject.trained, "Age.group")
+ggp2 <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  5, last_factor =  8)
+ggp3 <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  9, last_factor =  12, legend_position = 'right')
+
+grob1 <- ggplotGrob(ggp)
+grob2 <- ggplotGrob(ggp2)
+grob3 <- ggplotGrob(ggp3)
+
+pdf("MOFA_factors_vs_Age.group.pdf", width = 13, height = 5)
+grid.arrange(grob1, grob2, grob3, ncol = 3, widths =c(1,1,1.3))
+dev.off()
+```
+
+#### Sex
+
+```{r, fig.width=15, fig.height=5}
+if (config$sample_selection$include_MALE & 
+    config$sample_selection$include_FEMALE) {
+  
+  ggp <- plot(plot_factor_category(MOFAobject.trained, "Sex"))
+  
+  ggsave(file.path(outdir, "MOFA_factors_vs_Sex.png"), 
+         ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+  
+  ggp
+}
+
+```
+
+```{r, fig.width=15, fig.height=5}
+if (config$sample_selection$include_MALE) {
+  
+  ggp <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", 
+                       excluded_categories = "MALE_Klinefelter syndrome")
+  ggp2 <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", 
+                       excluded_categories = "MALE_Klinefelter syndrome", first_factor =  5, last_factor =  8)
+  ggp3 <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", 
+                       excluded_categories = "MALE_Klinefelter syndrome", first_factor =  9, last_factor =  12, legend_position = 'right')
+  
+  grob1 <- ggplotGrob(ggp)
+  grob2 <- ggplotGrob(ggp2)
+  grob3 <- ggplotGrob(ggp3)
+
+  pdf("MOFA_factors_vs_Sex.PhenotypicFeature.group.pdf", width = 13, height = 4)
+  grid.arrange(grob1, grob2, grob3, ncol = 3, widths =c(1,1,1.3))
+  dev.off()
+}
+```
+
+
+#### Smoking status
+
+```{r, fig.width=15, fig.height=5}
+ggp <- plot_factor_category(MOFAobject.trained, "Smoking.Status", 
+                            excluded_categories = c("Unknown If Ever Smoked"))
+ggsave(file.path(outdir, 
+                 "MOFA_factors_vs_Smoking.Status.png"), 
+       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+ggp
+```
+
+#### BMI
+
+```{r, fig.width=15, fig.height=5}
+ggp <- plot_factor_category(MOFAobject.trained, "BMI.group")
+ggp2 <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  5, last_factor =  8)
+ggp3 <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  9, last_factor =  12, legend_position = 'right')
+
+grob1 <- ggplotGrob(ggp)
+grob2 <- ggplotGrob(ggp2)
+grob3 <- ggplotGrob(ggp3)
+
+pdf("MOFA_factors_vs_BMI.group.pdf", width = 13, height = 4)
+grid.arrange(grob1, grob2, grob3, ncol = 3, widths =c(1,1,1.3))
+dev.off()
+```
+
+#### Blood group
+
+```{r, fig.width=15, fig.height=5}
+ggp <- plot_factor_category(MOFAobject.trained, "ABO.Blood.Group")
+ggsave(file.path(outdir, 
+                 "MOFA_factors_vs_ABO.Blood.Group.png"), 
+       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+ggp
+```
+
+```{r, fig.width=15, fig.height=5}
+ggp <- plot_factor_category(MOFAobject.trained, "Rh.Blood.Group")
+ggsave(file.path(outdir, 
+                 "MOFA_factors_vs_Rh.Blood.Group.png"), 
+       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+ggp
+```
+
+### Genomic abberations
+ 
+```{r, fig.width=15, fig.height=5}
+ggp <- plot_factor_category(MOFAobject.trained, "Genomic_Abberation")
+ggsave(file.path(outdir, 
+                 "MOFA_factors_vs_Gene_Abberation.png"), 
+       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+ggp
+```
+
+
+## Save MOFA results
+
+MOFA factor weights and omics feature annotations are saved for downstream 
+analyses such as pathway enrichment analysis (PEA).
+
+```{r}
+MOFA_weights <- get_weights(MOFAobject.trained)
+names(MOFA_weights) <- lapply(names(MOFA_weights), function(x) {
+    new_name <- assay_names_df[assay_names_df$shorter_assay_names == x, 1]
+    new_name
+}) 
+
+
+lapply(assay_names, function(a) {
+
+  df <- cbind(MOFA_weights[[a]], data.frame(rowData(mae[[a]])))
+  
+  f <- gsub("[| ,]", "_", a)
+  write.csv(df, file = file.path(outdir, paste0("factorweights_", f, ".csv")))
+})
+```
+
+
+## Session information
+
+```{r}
+sessionInfo()
+```
+
+## References

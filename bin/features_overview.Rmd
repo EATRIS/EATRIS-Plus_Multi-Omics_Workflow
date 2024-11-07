@@ -1,0 +1,326 @@
+---
+title: "Features_overview"
+author:
+- Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+#bibliography: references.bib
+params:
+  config_file: "config.yml"
+---
+
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$FEATURES
+#dir.create(outdir)
+```
+
+## Read input data 
+
+Input data is a MultiAssayExperiment (MAE) object. 
+```{r}
+library(MultiAssayExperiment)
+library(HDF5Array)
+
+mae <- loadHDF5MultiAssayExperiment(dir = config$mae_hdf5_dir_path, 
+                                     prefix = config$mae_hdf5_prefix)
+
+mae
+```
+## Get omics names list
+```{r}
+assay_names <- config$experiment_names$CV
+
+
+# TODO change to readable (shorter) names
+
+shorter_assay_names <- c(
+  'Lipidomics (P)',
+  'Lipidomics (N)',
+  'VLCFA',
+  'Acylcarnitines',
+  'Amino acids',
+  'Proteomics',
+  'mRNA-seq',
+  'miRNA-seq',
+  'miRNA qRT-PCR',
+  'EM-seq (var)',
+  'EM-seq (random)',
+  'Metabolomics'
+)
+
+assay_names_temp <- assay_names
+assay_names_temp[[12]] <- 'Metabolomics' 
+
+assay_names_df <- data.frame(assay_names_temp, shorter_assay_names)
+#names(assay_names) <- shorter_assay_names
+
+assay_names_df
+```
+
+
+
+## Functions used to retrieve data from MAE
+```{r}
+
+# Function to read omics data from MAE into a scaled dataframe
+
+read_omics_from_mae <- function(mae_object, name_assay){
+  se <- mae_object[[name_assay]]
+  df_wide <- data.frame(t(assay(se)))
+  df_wide <- df_wide[ , colSums(is.na(df_wide))==0]
+  # Log transform lipidomcs data
+  # if (name_assay %in% c("mRNA-seq | batch-adjusted")) {
+  #   #df_wide <- as.data.frame(df_wide, center = F, scale = TRUE)
+  #   df_wide <- data.frame(lapply(df_wide, function(x) {log(x+1)}))
+  # }
+  df_wide
+  
+}
+
+# Function to combine metabolomics data
+combine_mtblmcs_data <- function(list_of_assays) {
+  df <- cbind(data.frame(list_of_assays$`Very long chain fatty acids | unscaled`),
+                      data.frame(list_of_assays$`Acylcarnitines | unscaled`),
+                      data.frame(list_of_assays$`Amino acids | unscaled`))
+  return(df)
+}
+
+combine_mtblmcs_data_sex <- function(list_of_assays, item) {
+  df <- cbind(data.frame(list_of_assays$`Very long chain fatty acids | unscaled`[[item]]),
+                      data.frame(list_of_assays$`Acylcarnitines | unscaled`[[item]]),
+                      data.frame(list_of_assays$`Amino acids | unscaled`[[item]]))
+  return(df)
+}
+```
+
+
+## Make list of assays
+```{r}
+
+assay_list <- lapply(assay_names, function(assay_name) {
+  df_wide <- read_omics_from_mae(mae, assay_name)
+  }) 
+names(assay_list) <- assay_names
+
+# Combine targeted metabolomics, append to assay_list
+mtblmcs_combined <- combine_mtblmcs_data(assay_list)
+
+
+assay_list$`Targeted metabolomics` <- mtblmcs_combined
+
+# Add shorter names 
+names(assay_list) <- assay_names_df$shorter_assay_names
+
+```
+
+
+
+## Get Omics list, sex stratified
+```{r}
+
+# Make list with omics data, for male/female separate
+
+assay_list_sex_stratified <- lapply(assay_names, function(assay_name) {
+    # Make separate MAE for Male/Female  
+    mae_male <- mae[, colData(mae)$Sex %in% c('MALE')]
+    mae_female <- mae[, colData(mae)$Sex %in% c('FEMALE')]
+    
+    # Read omics data into dataframes
+    df_male <- read_omics_from_mae(mae_male, assay_name)
+    df_female  <- read_omics_from_mae(mae_female, assay_name)
+    
+    list(df_male, df_female)
+  }) 
+names(assay_list_sex_stratified) <- assay_names
+
+# Combine targeted metabolomics, append to assay_list
+mtblmcs_combined_male <- combine_mtblmcs_data_sex(assay_list_sex_stratified, 1)
+mtblmcs_combined_female <- combine_mtblmcs_data_sex(assay_list_sex_stratified, 2)
+
+
+assay_list_sex_stratified$`Targeted metabolomics` <- list(mtblmcs_combined_male, mtblmcs_combined_female)
+
+# Add shorter names 
+names(assay_list_sex_stratified) <- assay_names_df$shorter_assay_names
+```
+
+## Functions to calculate reference values (CV, SD, MEAN, MEDIAN, MIN and MAX)
+
+```{r, fig.width = 20}
+
+library(ggplot2)
+library(ggrepel)
+library(ggokabeito) # Okabe-Ito
+
+
+# Function to create dataframe of Coefficients of Variance (CV) per feature
+make_CV_df <- function(df_input) {
+  
+  # Calculate Coefficients of Variance
+  df_input <- df_input + (abs(min(df_input)) + 1)
+  CV_list <- sapply(df_input, function(x) sd(x) / mean(x) * 100)
+  #CV_list <- sapply(df_input, function(x) sd(x))
+  
+  df_out <- data.frame(CV_list)
+  colnames(df_out) <- c('CV')
+  
+  return(df_out)
+}
+
+
+make_ref_values_df <- function(df_input) {
+  
+  # Calculate Coefficients of Variance
+  df_input_cv <- df_input + (abs(min(df_input)) + 1)
+  CV_list <- sapply(df_input_cv, function(x) sd(x) / mean(x) * 100)
+  
+  # Calculate more reference values
+  SD_list <- sapply(df_input, function(x) abs(sd(x)))
+  mean_list <- sapply(df_input, function(x) mean(x))
+  median_list <- sapply(df_input, function(x) median(x))
+  min_list <- sapply(df_input, function(x) min(x))
+  max_list <- sapply(df_input, function(x) max(x))
+
+  
+  df_out <- data.frame(CV_list, SD_list,
+                       mean_list, median_list,
+                       min_list, max_list)
+  colnames(df_out) <- c('CV','SD', 'MEAN', 'MEDIAN', 'MIN', 'MAX')
+  
+  return(df_out)
+}
+
+
+```
+
+
+## Make density plots of CVs for each -omics, sex-stratified
+```{r, fig.width=20}
+# Function to make density plot for sex-stratified data
+
+save_reference_values2csv <- function(item) {
+  
+  # Get Data frames, omics name
+  input_df_male <- assay_list_sex_stratified[[item]][[1]]
+  input_df_female <- assay_list_sex_stratified[[item]][[2]]
+  name <- names(assay_list_sex_stratified)[[item]]
+  print(name)
+  
+  # Male
+  Ref_df_male <- make_ref_values_df(input_df_male)
+  
+  # Female
+  Ref_df_female <- make_ref_values_df(input_df_female)
+
+  # Dataframe to save as CSV
+  df_combined <- merge(Ref_df_male, Ref_df_female, by = 'row.names', all = T)
+  
+  colnames(df_combined) <- c('Feature',
+                             'CV_male', 'SD_male',
+                             'MEAN_male', 'MEDIAN_male',
+                             'MIN_male', 'MAX_male', 
+                             'CV_Female', 'SD_Female',
+                             'MEAN_Female', 'MEDIAN_Female',
+                             'MIN_Female', 'MAX_Female')
+
+   # Save to CSV
+  outdir <- config$output_directory$CV
+  filename <- paste0(name, "_CVs.csv")
+  out_path <- file.path(outdir, filename)
+  dir.create(out_path)
+  write.csv(df_combined, filename, row.names = F)
+}
+
+
+make_CV_plot_sex_stratified <- function(item) {
+  
+  # Get Data frames, omics name
+  input_df_male <- assay_list_sex_stratified[[item]][[1]]
+  input_df_female <- assay_list_sex_stratified[[item]][[2]]
+  name <- names(assay_list_sex_stratified)[[item]]
+  
+  # Male
+  CVs_df_male <- make_CV_df(input_df_male)
+  CVs_df_male$Sex <- rep(paste0('Male'), times=nrow(CVs_df_male))
+  
+  # Female
+  CVs_df_female <- make_CV_df(input_df_female)
+  CVs_df_female$Sex <- rep(paste0('Female'), times=nrow(CVs_df_female))
+
+  # Combine CV dataframes into one for plot
+  Df_combined <- rbind(CVs_df_male, CVs_df_female)
+
+  p <- ggplot(Df_combined, aes(x=CV, fill=Sex)) +
+    geom_density(color = 'darkblue', alpha=0.7)+
+    theme_bw() +
+    scale_fill_okabe_ito(order = c(7,5)) +
+    ggtitle(paste0(name, ", ", nrow(CVs_df_male), " features")) + 
+    theme_grey(base_size=22) +
+    theme(plot.title = element_text(size = 25)) +
+    xlim(c(0,40))
+  return(p)
+}
+```
+
+
+## Save reference values to .csv files
+```{r}
+lapply(seq(1:nrow(assay_names_df)), function(x) save_reference_values2csv(x))
+```
+
+## Plot Coefficients of Variances per -omics type
+```{r, fig.width=20}
+#lapply(seq(1:nrow(assay_names_df)), function(x) make_CV_plot_sex_stratified(x)) ##Plot all
+plot_list <- lapply(seq(1:11), function(x) make_CV_plot_sex_stratified(x)) ## Without metabolomics combined and aCGH
+```
+
+### Histogram for Very Long Chain Fatty Acids
+
+```{r, fig.width=20}
+input_df_male <- assay_list_sex_stratified$VLCFA[[1]]
+input_df_female <- assay_list_sex_stratified$VLCFA[[2]]
+  
+# Male
+CVs_df_male <- make_CV_df(input_df_male)
+CVs_df_male$Sex <- rep(paste0('Male'), times=nrow(CVs_df_male))
+  
+# Female
+CVs_df_female <- make_CV_df(input_df_female)
+CVs_df_female$Sex <- rep(paste0('Female'), times=nrow(CVs_df_female))
+
+# Combine dataframes into onec
+Df_combined <- rbind(CVs_df_male, CVs_df_female)
+colnames(Df_combined) <- c('CV', 'Sex')
+
+p <- ggplot(Df_combined, aes(x=CV, fill=Sex)) +
+    geom_histogram(color = 'darkblue', bins = 60) +
+    #theme_bw() +
+    
+    scale_fill_okabe_ito(order = c(7,5)) +
+    ggtitle('Very Long Chain Fatty Acids, 5 features') + 
+    theme_grey(base_size=22) +
+    theme(plot.title = element_text(size = 25)) +
+    xlim(c(0,40))
+p
+```
+
+## Grid arrange all plots together
+```{r}
+library(gridExtra)
+
+plot_list[[3]] <- p
+n <- length(plot_list)
+nrow <- ceiling(n /2)
+pdf("arranged_plot.pdf", width = 26, height = 3 * nrow)
+do.call(grid.arrange, c(plot_list, ncol = 2, padding=unit(20, "cm")))
+dev.off()
+```
+

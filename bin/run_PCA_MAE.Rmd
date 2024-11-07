@@ -1,0 +1,721 @@
+---
+title: 'Principal component analysis (PCA)'
+author:
+  - Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+  - Anna Niehues^[Radboud university medical center, Anna.Niehues@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+#bibliography: references.bib
+params:
+  config_file: "config.yml"
+---
+
+This R notebook performs Principal Component Analysis (PCA) using `prcomp` [@R2022] on each individual omics data set provided in a `MultiAssayExperiment` [@Ramos2017].
+Some omics types have different versions of processed data, e.g., data containing missing values and data with imputed missing values.
+As PCA cannot handle missing values, data with imputed values is used for this analysis. 
+If both batch effect adjusted and unadjusted data are available, PCA is performed on both data sets.
+
+## Read data and metadata: MultiAssayExperiment
+
+The `MultiAssayExperiment` [@Ramos2017] contains preprocessed data and has been created with the *R* notebook `examples\create_MultiAssayExperiment.Rmd`.
+
+```{r read_multiassayexperiment}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$PCA
+dir.create(outdir)
+```
+
+
+
+```{r}
+require(SummarizedExperiment)
+library(MultiAssayExperiment)
+
+
+mae <- loadHDF5MultiAssayExperiment(
+  dir = config$mae_hdf5_dir_path, 
+  prefix = config$mae_hdf5_prefix)
+mae
+```
+
+The MultiAssayExperiment contains individual omics assays
+
+```{r}
+experiments(mae)
+```
+
+```{r}
+# extract names of experiments
+experiment_names <- config$experiment_names$PCA
+names(experiment_names) <- experiment_names
+
+# # exclude experiments that contain missing data
+# experiment_names <- experiment_names[
+#   !sapply(strsplit(experiment_names, " | ", fixed = T), function(n) {
+#     "with missing values" %in% n })]
+
+experiment_names
+
+# make sure that there are no missing values
+stopifnot(sapply(experiment_names, function(n) {
+  !any(is.na(assays(mae[[n]])[[1]]))
+}))
+```
+
+
+Technical variables are available per assay
+
+```{r}
+tech_vars_factor <- lapply(experiments(mae), function(x) {
+  num_levels <- apply(colData(x), 2, function(x) {length(levels(as.factor(x)))})
+  t <- names(colData(x))[num_levels <= 9 & num_levels > 1]
+  t <- t[t!="subject.id"]
+  t <- t[!t %in% names(colData(mae))]
+})
+tech_vars_factor
+
+tech_vars_continuous <- lapply(experiments(mae), function(x) {
+  num_levels <- apply(colData(x), 2, function(x) {length(levels(as.factor(x)))})
+  t <- names(colData(x))[num_levels > 9]
+  t <- t[t!="subject.id"]
+  t <- t[t!="measurement.id"]
+  t <- t[t!="measurement_names"]
+  t <- t[t!="ID.Patient"]
+  t <- t[!t %in% names(colData(mae))]
+})
+tech_vars_continuous
+```
+
+**NOTE:** consider add sum (total carnitines) and ratios (vlcfa: C24/C22 and C26/C22)
+
+Phenotype information shared across all assays can be accessed via `colData()`
+
+```{r}
+names(colData(mae))
+```
+
+
+```{r}
+# variable describing both Sex and PhenotypicFeature
+colData(mae)$Sex.PhenotypicFeature <- gsub(
+  ".NA", "", paste(colData(mae)$Sex, colData(mae)$PhenotypicFeature, sep = "."))
+```
+
+
+
+
+## Principal component analysis -- PCA
+
+PCA performed on standardized (centered to mean and scaled to unit-variance) data.
+
+```{r run_pca}
+run_pca_se <- function(se) {
+  # run PCA on SummarizedExperiment
+  a <- t(assays(se)[[1]])
+  # remove non-variable features
+  a <- a[, apply(a, 2, function(column) {
+    var(column) != 0 })]
+  # standardize and run PCA
+  pca <- prcomp(a, center = T, scale. = T)
+}
+
+pca <- lapply(experiment_names, function(n) {run_pca_se(mae[[n]])})
+```
+
+
+### PCA -- scree plots 
+
+Scree plots are bar plots showing the explained variation per Principal Component (PC).
+Cumulative explained variation is shown as a line.
+
+```{r pcs_scree_plots}
+library(ggplot2)
+#'  Create a screeplot of the variance explained by principal components
+#'  
+#'  @param pc PCA as input
+#'  @param name_file Name of the barplot (.png file)
+#'  @return The screeplot object 
+make_screeplot <- function(pc, main_title) {
+  require(ggplot2)
+  require(ggbreak)
+  # create summary of pca
+  vars <- pc$sdev^2
+  vars <- vars/sum(vars)
+  df <- as.data.frame(cbind(
+    'SD' = pc$sdev, 'Prop' = vars, 'cumulative' = cumsum(vars)))
+  df$PC <- seq(nrow(df))
+  df$Prop <- df$Prop * 100
+  df$cumulative <- df$cumulative * 100
+  df <- df[c('PC', 'SD', 'Prop', 'cumulative')]
+  df <- as.data.frame(lapply(df, unlist))
+  
+  # Get number of PCs that explain 80%
+  eighty_percent <-  min(which(df$cumulative > 80))
+  scale <- round(eighty_percent/25)
+  if (scale == 0) {
+    scale <- 1
+  }
+  
+  # Screeplot
+  plot1 <- ggplot(data = df[df$PC <= eighty_percent+3, ], 
+                  aes(x = PC, y = Prop)) + #reorder(PC, -Prop)
+    geom_bar(stat = 'identity') +
+    geom_line(aes(y=cumulative,group=1 ), size = 1, color = 'red') +
+    xlab('Principal Component') +
+    ylab('Proportion of variance explained (%)') +
+    theme(plot.title = element_text(size = 12, hjust = 0.5),
+          legend.position = 'none') +
+    ggtitle(main_title)
+  plot1 <- plot1 + 
+    geom_vline(aes(xintercept = eighty_percent), size = 2) +
+    geom_label(aes(x = eighty_percent, y = 0.50,
+                   label = '80%', vjust = -1, size = 8)) 
+  plot1 <- plot1 +
+    scale_x_continuous(breaks = seq(1, length(df$PC), by = 1), position = "bottom")
+  if (eighty_percent > 18) {
+    plot1 <- plot1 + scale_x_break(breaks = c(13, eighty_percent-3))
+  }
+  return(plot1)
+}
+
+
+# lapply(names(pca), function(x) {
+#   make_screeplot(pca[[x]], paste0("PCA, scree plot\n", x))
+#})
+```
+
+
+### PCA -- score plots 
+
+#### Pairwise scatter plots of PC scores colored by biological and technical variables
+
+```{r pca_score_plots}
+library(ggplot2)
+library(GGally)
+library(ggokabeito) # Okabe-Ito
+
+bio_vars <- c(
+  "Sex",
+  "Sex.PhenotypicFeature", 
+  "Age.group",
+  "BMI.group",
+  "Smoking.Status",
+  "ABO.Blood.Group",
+  "Rh.Blood.Group")
+
+num_PCs <- 3
+
+lapply(names(pca), function(assay_name) { 
+  lapply(c(bio_vars, tech_vars_factor[[assay_name]]), function(color_var) {
+    message("PCA score plots - ", assay_name, ", ", color_var)
+    # PCA scores 
+    pca_scores <- as.data.frame(pca[[assay_name]]$x[, 1:num_PCs])
+    # data for coloring
+    if (color_var %in% bio_vars) {
+      pca_scores[[color_var]] = colData(mae)[rownames(pca_scores), color_var]
+    } else {
+      pca_scores[[color_var]] = colData(experiments(mae)[[assay_name]])[
+        rownames(pca_scores), color_var]
+    }
+    num_factor_levels <- length(levels(as.factor(pca_scores[[color_var]])))
+    if (num_factor_levels > 1) { # multiple factor levels
+      # refactor NA to "NA" - otherwise not shown in ggpairs plot
+      levels(pca_scores[[color_var]]) <- c(levels(pca_scores[[color_var]]), "NA")
+      pca_scores[[color_var]][is.na(pca_scores[[color_var]])] <- "NA"
+      # pairs plot of PCs
+      ggp <- ggpairs(
+        pca_scores, 
+        columns = 1:num_PCs,
+        aes(color = .data[[color_var]]),#, shape = .data[[color_var]], alpha = 0.25),
+        progress = FALSE,
+        diag = list(continuous = "barDiag"),
+        upper = list(continuous = "blank"),
+        legend = 1
+      ) +
+        ggtitle(stringr::str_wrap(paste0(
+          "PCA score plot, color by ", color_var, ", ", assay_name), width = 60)) +
+        theme_bw() +
+        # suppress showing alpha in legend
+        scale_alpha(guide = "none")
+      # change color palette
+      for (i in 1:ggp$nrow) {
+        for (j in 1:ggp$ncol) {
+          ggp[i, j] <- ggp[i, j] +
+            # color blind friendly palette: Okabe-Ito
+            scale_color_okabe_ito() + scale_fill_okabe_ito()
+        }
+      }
+      ggp + theme(legend.position = "bottom") 
+    } else {
+      ggp <- NULL
+    }
+    ggp
+  })
+})
+```
+
+#### Box plots of PC scores colored by biological and technical variables
+
+Outlier samples are labeled. Statistical tests are performed to determine if PCs are significantly associated with biological or technical variables
+
+```{r pca_box_plots, results='asis'}
+library(reshape2)
+library(dplyr)
+library(ggrepel)
+library(ggpubr)
+num_PCs <- 10
+
+detect_outlier <- function(x) {
+  {x < quantile(x, 0.25) - 1.5 * IQR(x)} | {
+    x > quantile(x, 0.75) + 1.5 * IQR(x)}
+}
+
+shorten_name <- function(filename) {
+  filename <- gsub(" ", "", filename, fixed = T)
+  filename <- gsub("Verylongchainfattyacids", "VLCFA", filename, fixed = T)
+  filename <- gsub("imputedmissingvalues", "imputed", filename, fixed = T)
+  filename <- gsub("cell-typeadjusted", "celltypeadj", filename, fixed = T)
+  filename <- gsub("|", "_", filename, fixed = T)
+  filename <- gsub("batch-adjusted", "batchadj", filename, fixed = T)
+  filename <- gsub("100,000", "100000", filename, fixed = T)
+  filename <- gsub("CpGsites", "CpGs", filename, fixed = T)
+  filename
+}
+
+box_plots <- list()
+significant_associations_factor <- list()
+i <- 1
+
+for (assay_name in names(pca)) {
+  for (color_var in c(bio_vars, tech_vars_factor[[assay_name]])) {
+    message("PCA scores box plots - ", assay_name, ", ", color_var)
+    # PCA scores 
+    num_PCs_ <- ifelse(num_PCs > ncol(pca[[assay_name]]$x),
+                       ncol(pca[[assay_name]]$x), num_PCs)
+    pca_scores <- as.data.frame(pca[[assay_name]]$x[, 1:num_PCs_])
+    # data for coloring
+    if (color_var %in% bio_vars) {
+      pca_scores[[color_var]] = as.factor(
+        colData(mae)[rownames(pca_scores), color_var])
+    } else {
+      pca_scores[[color_var]] = as.factor(
+        colData(experiments(mae)[[assay_name]])[rownames(pca_scores), color_var])
+    }
+    if (length(levels(pca_scores[[color_var]])) > 1) { # multiple factor levels
+      pca_scores$subject.id <- rownames(pca_scores)
+      pca_scores_long <- pca_scores %>%
+        melt(id.vars = c("subject.id", color_var)) %>%
+        group_by(across(c(all_of(color_var), "variable"))) %>%
+        mutate(outlier = ifelse(detect_outlier(value), 
+                                gsub("CZC", "", subject.id), NA))
+      # compare mean values of groups - significance tests
+      stat_tests <- compare_means(
+        as.formula(paste0('value~', color_var)),
+        data = pca_scores_long, group.by = "variable")
+      stat_tests$assay_name <- assay_name
+      stat_tests$tested_variable <- color_var
+      df <- data.frame(stat_tests[stat_tests$p < 0.05, ])
+      # if (nrow(df) > 0) {
+      significant_associations_factor[[i]] <- local(df)
+      # }
+      print(knitr::kable(stat_tests))
+      cat("\n\n") # some extra lines for kable
+      # box plot
+      ggp <- ggplot(pca_scores_long, 
+             aes(x = variable, y = value, fill = .data[[color_var]])) +
+        geom_boxplot(position = position_dodge(width = 0.9)) +
+        geom_text_repel( # label outliers
+          aes(label = outlier), na.rm = TRUE, 
+          position = position_dodge(width = 0.9)) + 
+        scale_fill_okabe_ito() + 
+        #stat_compare_means() +
+        ggtitle(stringr::str_wrap(paste0(
+          "Box plot, PC scores, color by ", color_var, ", ", assay_name), 
+          width = 60)) +
+        theme_bw() +
+        theme(
+          axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          # panel.spacing.x = unit(0, "lines"),
+          legend.position = "bottom") +
+        facet_wrap(vars(variable), nrow = 1, scales = "free") 
+      filename <- shorten_name(
+        paste0("PCAscoreboxplot_", assay_name, "_", color_var, ".png"))
+      ggsave(file.path(outdir, filename), ggp,
+             width = 28.04, height = 10.46, units = "cm", dpi = 300)
+      box_plots[[i]] <- local(ggp)
+      i <- i + 1
+    }
+  }
+}
+```
+
+
+```{r, fig.width=20}
+lapply(box_plots, plot)
+```
+
+```{r}
+significant_associations_factor <- do.call(rbind, significant_associations_factor)
+head(significant_associations_factor)
+dim(significant_associations_factor)
+dim(significant_associations_factor[significant_associations_factor$p.adj<0.05,])
+```
+
+
+### Correlation of PCs with biological variables
+
+```{r pca_corr_plots}
+library(corrplot)
+
+bio_vars_continuous <- c(
+  "Age",
+  "Height",
+  "Weight",
+  "BMI",
+  "Leukocytes",
+  "Erythrocytes",
+  "Hemoglobin",
+  "Hematocrit",
+  "Platelets",
+  "MCV",
+  "MCH",
+  "MCHC",
+  "Lymphocytes",
+  "MXD",
+  "Neutrophils")
+
+sig.level <- 0.05
+
+significant_associations_contin <- lapply(names(pca), function(assay_name) {
+  message("Correlations - ", assay_name)
+  num_PCs_calculated <- dim(pca[[assay_name]]$x)[2]
+  print(num_PCs_calculated)
+  expl_var <- pca[[assay_name]]$sdev^2 / sum(pca[[assay_name]]$sdev^2)
+  num_PCs_todisplay <- ifelse(num_PCs > num_PCs_calculated, 
+                              num_PCs_calculated, num_PCs)
+    #sum(expl_var>0.02)
+  
+    
+  expl_var <- expl_var[1:num_PCs_todisplay]
+  
+  pca_scores <- as.data.frame(
+    pca[[assay_name]]$x[, 1:num_PCs_todisplay])
+  phenotype_continuous = as.data.frame(
+    colData(mae)[rownames(pca_scores), bio_vars_continuous])
+  phenotype_continuous <- cbind(
+    phenotype_continuous,
+    subset(data.frame(colData(mae[[assay_name]]))[rownames(pca_scores), ],
+           select = tech_vars_continuous[[assay_name]]))
+  # calculate correlation
+  score_pheno_cor <- cor(
+   pca_scores, phenotype_continuous, 
+   method = "pearson", use = "pairwise.complete.obs")
+  # significance test
+  sig_test <- psych::corr.test(
+    pca_scores, phenotype_continuous,
+    use = "pairwise",
+    method = "pearson",
+    adjust = "BH",
+    alpha = sig.level
+  )
+  
+  significant_cor <- NULL
+  if (sum(sig_test$p < 0.05) > 0) {
+    significant_cor <- data.frame(sig_test$p)
+    significant_cor$variable <- rownames(significant_cor)
+    significant_cor <- tidyr::gather(
+      significant_cor, "tested_variable", "p", -variable)
+    significant_cor <- significant_cor[significant_cor$p < 0.05, ]
+    significant_cor$p.adj <- apply(significant_cor, 1, function(row) {
+      sig_test$p.adj[row[["variable"]], row[["tested_variable"]]]
+    })
+    significant_cor$assay_name <- assay_name
+    significant_cor$method <- "Pearson"
+    significant_cor$.y. <- significant_cor$group1 <- significant_cor$group2 <-
+      significant_cor$p.format <- significant_cor$p.signif <- NA
+  }
+  
+  rownames(score_pheno_cor) <- paste0(
+    sprintf("%-4s", rownames(score_pheno_cor)), 
+    " ",  
+    sprintf("%3s", scales::percent(
+      round(expl_var,2))))
+  
+  # correlation plot with FDR-adjusted p-values 
+  cor_lim <- max(abs(c(min(score_pheno_cor), max(score_pheno_cor))))
+  
+  png(file.path(outdir, 
+                paste0("PCA_cor_", shorten_name(assay_name), ".png")),
+    width = 28.04, height = 10.46, units = "cm", res = 300)
+  corrplot(
+    score_pheno_cor, 
+    is.corr = FALSE,
+    col.lim = c(-cor_lim, cor_lim),
+    title = stringr::str_wrap(assay_name, width = 30),
+    mar = c(0, 0, 3, 0),
+    tl.col = "black",
+    p.mat = sig_test$p.adj,
+    sig.level = sig.level)
+  dev.off()
+  corrplot(
+    score_pheno_cor, 
+    is.corr = FALSE,
+    col.lim = c(-cor_lim, cor_lim),
+    title = stringr::str_wrap(assay_name, width = 30),
+    mar = c(0, 0, 3, 0),
+    tl.col = "black",
+    p.mat = sig_test$p.adj,
+    sig.level = sig.level)
+  
+  # make scatter plot of PCs and variables with significant correlation
+  sig_pairs <- as.data.frame(which(sig_test$p.adj < sig.level, arr.ind = TRUE))
+  sig_pairs$p.adj <- sig_test$p.adj[which(sig_test$p.adj < sig.level)]
+  sig_pairs <- sig_pairs[order(sig_pairs$row), ] # sort by PCs
+  if (dim(sig_pairs)[1] > 0) {
+    apply(sig_pairs, 1, function(x) {
+      pc_ <- rownames(sig_test$p.adj)[[x[["row"]]]]
+      bio_ <- colnames(sig_test$p.adj)[[x[["col"]]]]
+      df <- data.frame(pc_ = pca_scores[, pc_], 
+                       bio_ = phenotype_continuous[, bio_])
+      names(df) <- c(pc_, bio_)
+      ggp <- ggplot(df, aes(x = .data[[pc_]], y = .data[[bio_]])) +
+        geom_point() +
+        stat_smooth(method = "lm") +
+        stat_cor(method = "pearson") +
+        ggtitle(stringr::str_wrap(assay_name, width = 60)) +
+        theme_bw()
+      plot(ggp)
+      NULL
+    })
+  }
+  significant_cor
+})
+```
+
+
+```{r}
+significant_associations_contin <- do.call(rbind, significant_associations_contin)
+head(significant_associations_contin)
+
+
+```
+
+# Change to readable (shorter) names
+
+```{r}
+get_shorter_assay_names <- function(assay_name) {
+  
+  if (grepl(pattern = 'Lipidomics, negative', x = assay_name)){
+     short_name <- 'Lipidomics (N)'
+  }
+  else if (grepl(pattern = 'Lipidomics, positive', x = assay_name)){
+     short_name <- 'Lipidomics (P)'
+  }
+  else if (grepl(pattern = 'Very long chain', x = assay_name)){
+     short_name <- 'VLCFA'
+  }
+  else if (grepl(pattern = 'Acylcarnitines', x = assay_name)){
+     short_name <- 'Acylcarnitines'
+  }
+  else if (grepl(pattern = 'Amino acids', x = assay_name)){
+     short_name <- 'Amino acids'
+  }
+  else if (grepl(pattern = 'Proteomics', x = assay_name)){
+     short_name <- 'Proteomics'
+  }
+  else if (grepl(pattern = 'mRNA-seq', x = assay_name)){
+     short_name <- 'mRNA-seq'
+  }
+  else if (grepl(pattern = 'miRNA-seq', x = assay_name)){
+     short_name <- 'miRNA-seq'
+  }
+  else if (grepl(pattern = 'EM-seq', x = assay_name)){
+     short_name <- 'EM-seq'
+  }
+  else{
+    short_name <- assay_name
+  }
+  
+  short_name
+}  
+
+# Retrieve list of shorter assay names
+shorter_assay_names <- lapply(experiment_names, get_shorter_assay_names)
+
+assay_names_temp <- experiment_names
+
+assay_names_df <- data.frame(assay_names_temp, as.character(shorter_assay_names))
+#names(assay_names) <- shorter_assay_names
+
+assay_names_df
+```
+
+```{r, fig.width=10, fig.height=5}
+significant_associations <- rbind(
+  significant_associations_factor, 
+  significant_associations_contin[, names(significant_associations_factor)])
+
+significant_associations <- significant_associations[
+  significant_associations$tested_variable != "Sex.PhenotypicFeature",]
+if ("Group" %in% significant_associations$tested_variable) {
+  significant_associations[
+    significant_associations$tested_variable == "Group", 
+    ]$tested_variable <- "Batch"
+}
+if ("Measurement.date" %in% significant_associations$tested_variable) {
+  significant_associations[
+    significant_associations$tested_variable == "Measurement.date",
+    ]$tested_variable <- "Batch"
+}
+
+unique(significant_associations$tested_variable)
+significant_associations$tested_variable <- factor(
+  significant_associations$tested_variable,
+  levels = c(
+    "Sex", 
+    "Height", "Weight", "BMI", "BMI.group", 
+    "Age", "Age.group", "Smoking.Status", 
+    "ABO.Blood.Group", "Rh.Blood.Group", 
+    "Leukocytes", 
+    "Neutrophils", 
+    "Lymphocytes", 
+    "MXD", 
+    "Erythrocytes", 
+    "Hemoglobin", 
+    "Hematocrit", 
+    "MCHC", 
+    "MCV", 
+    "MCH", 
+    "Platelets", 
+    "Injection_Order", "Batch"))
+
+unique(significant_associations$assay_name)
+significant_associations$assay_name <- factor(
+  significant_associations$assay_name,
+  levels = experiment_names
+)
+
+significant_associations$expl_var <- apply(
+  significant_associations, 1, function(row) {
+    vars <- pca[[row[["assay_name"]]]]$sdev^2
+    vars <- vars/sum(vars)
+    vars[as.numeric(gsub("PC", "", row[["variable"]]))]
+  })
+
+
+library(dplyr)
+data2plot <- significant_associations %>%
+  filter(p.adj < 0.05) %>%
+  group_by(assay_name, tested_variable) %>%
+  summarise(`Cumulative variation\nexplained by significant PCs` = sum(expl_var))
+
+
+data2plot <- data2plot[!is.na(data2plot$tested_variable), ] # Remove rows with NA value for tested_variable.
+#TODO: Add miRNA-qPCR_RT continuous tech variable to bio_vars_continuous. Or technical vars?
+
+data2plot$`Variable type` <- "Clinical hematology"
+data2plot[data2plot$tested_variable == "Batch", ]$`Variable type` <- "Technical"
+data2plot[data2plot$tested_variable %in% c(
+  "Sex", "Height", "Weight", "BMI", "BMI.group", 
+  "Age", "Age.group", "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group",
+  "Age_pred_BLUP", "Age_acc_BLUP", "Age_pred_Levine", "Age_acc_Levine"), 
+  ]$`Variable type` <- "Phenotype"
+
+
+# Add shorter names
+shorter_names <- lapply(data2plot$assay_name, function(x) {
+    new_name <- assay_names_df[assay_names_df$assay_names_temp == x, 2]
+    new_name
+}) 
+data2plot$assay_name <- shorter_names
+data2plot$assay_name <- as.factor(as.character(data2plot$assay_name))
+
+# Manually add missing associations, to include in the plot anyway
+temp_df <- data.frame(temp='miRNA-seq', temp0='Age', temp1=NA, temp2='Phenotype')
+temp_df <- rbind(temp_df, c(temp='miRNA-seq', temp0='Age', temp1=NA, temp2='Phenotype'))
+temp_df$temp1 <- as.numeric(temp_df$temp1)
+colnames(temp_df) <- colnames(data2plot)
+data2plot <- rbind(data2plot, temp_df)
+
+ggp <- ggplot(data2plot) +
+  geom_point(aes(x = factor(.data$tested_variable, levels = c(
+    "Sex", 
+    "Height", "Weight", "BMI", "BMI.group", 
+    "Age", "Age.group", "Smoking.Status", 
+    "ABO.Blood.Group", "Rh.Blood.Group", 
+    "Leukocytes", 
+    "Neutrophils", 
+    "Lymphocytes", 
+    "MXD", 
+    "Erythrocytes", 
+    "Hemoglobin", 
+    "Hematocrit", 
+    "MCHC", 
+    "MCV", 
+    "MCH", 
+    "Platelets", 
+    "Injection_Order", "Batch")),
+                 y = .data$assay_name,
+                 size = .data$`Cumulative variation\nexplained by significant PCs`,
+                 col = .data$`Variable type`)) +
+  theme(
+    axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1)
+  ) +
+  scale_color_okabe_ito() +
+  ylab("Data set") +
+  xlab("Biological/technical variable") +
+  ggtitle("Significant associations between top 10\nPrincipal Components and variables")
+
+ggsave(
+  file.path(outdir, "PCA_summary.png"),
+  plot = ggp,
+  width = 23, height = 10.46, units = "cm", dpi = 300)
+
+ggp
+```
+
+
+
+## Biological vs Chronological Age
+
+
+```{r, fig.width=10, fig.height=5}
+# ggp <- ggplot(data2plot) +
+#   geom_point(aes(x = factor(.data$tested_variable, levels = c(
+#     "Age", "Age.group", 
+#     "Age_pred_BLUP", "Age_acc_BLUP", 
+#     "Age_pred_Levine", "Age_acc_Levine")),
+#                  y = .data$assay_name,
+#                  size = .data$`Joint variation\nexplained by PCs`,
+#                  col = .data$`Variable type`)) +
+#   theme(
+#     axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1)
+#   ) +
+#   scale_color_okabe_ito() +
+#   ylab("Data set") +
+#   xlab("Biological/technical variable") +
+#   ggtitle("Significant associations between top 10\nPrincipal Components and variables")
+# 
+# ggsave(
+#   file.path(outdir, "PCA_summary_Age.png"),
+#   plot = ggp,
+#   width = 23, height = 10.46, units = "cm", dpi = 300)
+# 
+# ggp
+```
+
+## Session information
+
+```{r}
+sessionInfo()
+```
+
+
