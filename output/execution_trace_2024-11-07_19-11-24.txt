@@ -1,0 +1,2 @@
+task_id	name	process	status	exit	realtime	%cpu	cpus	container	rss
+1	RUN_CV (1)	RUN_CV	FAILED	255	221ms	-	2	/Singularity/r-mae_v0.3.sif	-

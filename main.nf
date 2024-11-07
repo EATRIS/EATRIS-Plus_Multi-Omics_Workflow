@@ -42,10 +42,10 @@ references = Channel.fromPath("${params.references}")
 
 
 include { RUN_CV } from './modules/single_omics.nf'
-include { LINEAR_MODELS } from './modules/single_omics.nf'
-include { RUN_PCA} from './modules/single_omics.nf'
-include { RUN_MOFA } from './modules/mofa.nf'
-include { RUN_PLS2 } from './modules/pls2.nf'
+//include { LINEAR_MODELS } from './modules/single_omics.nf'
+//include { RUN_PCA} from './modules/single_omics.nf'
+//include { RUN_MOFA } from './modules/mofa.nf'
+//include { RUN_PLS2 } from './modules/pls2.nf'
 
 
 
