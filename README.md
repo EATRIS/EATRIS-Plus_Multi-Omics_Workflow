@@ -8,6 +8,8 @@ Analysis workflow used to analyze the cohort of healthy blood donors
 - The data is stored in a Multi_Assay_Experiment object, which is used as input for the workflow
 - The object can be downloaded here: https://doi.org/10.5281/zenodo.10782800
 
+- Note: The MuData (Python) version coming up soon
+
 ###  Nextflow
 
  **Create a Conda Environment:** 
