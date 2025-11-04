@@ -17,7 +17,9 @@ def helpMessage() {
         nextflow run main.nf 
             --output dir/of/choice
             --mae_object path/to/mae_object
-	    --mudata dir/to/mudata.hd5	
+	    	--mudata dir/to/mudata.hd5		
+			--r_config path/to/r_config.yml
+			--references path/to/references.bib
        Optional arguments:
 	--container_dir				The directory where the required Singularity (.sif files) images are stored
 	--sil_cutoff				Cutoff silhouette score used for filtering fused networks (default = 0.05)
@@ -45,10 +47,9 @@ references = Channel.fromPath("${params.references}")
 ////////////////////////////////////////////////////+
 
 
-include { RUN_CV } from './modules/single_omics.nf'
-include { LINEAR_MODELS } from './modules/single_omics.nf'
-include { RUN_PCA} from './modules/single_omics.nf'
-include { RUN_MOFA } from './modules/mofa.nf'
+include { CELLTYPE_LEVELS; SINGLE_FEATURES } from './modules/single_omics.nf'
+include { LINEAR_MODELS; RUN_CV; RUN_PCA } from './modules/single_omics.nf'
+include { RUN_MOFA; RIBOSOMAL_RNA_RANKS } from './modules/mofa.nf'
 include { RUN_PLS2 } from './modules/pls2.nf'
 include { PREPARE_MUDATA } from './modules/mudata.nf'
 include { SINGLE_OMICS_CLUSTERING ; OMICS_COMBINATIONS ; SNF ; CONCAT_SIL_SCORES ; PLOT_SIL_SCORES; SNF_ANALYSIS; SNF_VENN_DIAGRAM } from './modules/snf'
@@ -70,18 +71,18 @@ workflow {
 
 
 	// Supplementary figures 
-	CELLTYPE_LEVELS(mae_object, r_config, references)
-	SINGLE_FEATURES(mae_object, r_config, references)
+	CELLTYPE_LEVELS(params.mae_object, params.r_config, params.references)
+	SINGLE_FEATURES(params.mae_object, params.r_config, params.references)
 	
 
 	// Single omics analyses
-	RUN_CV(mae_object, r_config, references)
+	RUN_CV(params.mae_object, params.r_config, params.references)
 	//LINEAR_MODELS(params.mae_object, params.r_config, params.references)
 	//RUN_PCA(params.mae_object, params.r_config, params.references)
 
 	// Multi omics analyses
 	//RUN_MOFA(params.mae_object, params.r_config, params.references)
-	RIBOSOMAL_RNA_RANKS(mae_object, r_config, references)
+	RIBOSOMAL_RNA_RANKS(params.mae_object, params.r_config, params.references)
 	//RUN_PLS2(params.mae_object, params.r_config, params.references)
 
 

@@ -7,7 +7,9 @@ output:
     toc: true
     df_print: paged
 params:
-  config_file: "config.yml"
+  config_file: NULL
+  references: NULL
+  mae_hdf5_dir_path: NULL
 ---
 
 
@@ -23,7 +25,7 @@ library(grid)
 
 ## Themes and colors
 ```{r}
-source('Z:/omics/EM-seq_UU/analysis/themes_and_colors.R')
+#source('Z:/omics/EM-seq_UU/analysis/themes_and_colors.R')
 ```
 
 
@@ -114,7 +116,7 @@ boxplots <- lapply(bio_vars_continuous, function(var) {
 ```{r}
 n <- length(boxplots)
 nrow <- ceiling(n /2)
-pdf("Z:/Results/2025_July_Rebuttal/CelltypeLevels.pdf", width = 1.7 * nrow, height = 3 * nrow)
+pdf("CelltypeLevels.pdf", width = 1.7 * nrow, height = 3 * nrow)
 #do.call(grid.arrange, c(boxplots, ncol =2))
 ggarrange(plotlist = boxplots, ncol =3, nrow = 10)
 dev.off()

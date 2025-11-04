@@ -65,7 +65,7 @@ process RUN_PCA {
 
     """
     cp -L $project_dir/bin/run_PCA_MAE.Rmd run_PCA_MAE.Rmd
-    Rscript -e  "rmarkdown::render(run_PCA_MAE.Rmd', output_format = 'html_document', output_file = 'pca_results.html', params = list(mae_hdf5_dir_path = '${mae_path}', config_file = '${config_file}', references = '${references}'  ))"
+    Rscript -e  "rmarkdown::render('run_PCA_MAE.Rmd', output_format = 'html_document', output_file = 'pca_results.html', params = list(mae_hdf5_dir_path = '${mae_path}', config_file = '${config_file}', references = '${references}'  ))"
     """
     
 }
@@ -85,7 +85,7 @@ process CELLTYPE_LEVELS {
 
     """
     cp -L $project_dir/bin/celltype_levels.Rmd celltype_levels.Rmd
-    Rscript -e  "rmarkdown::render(celltype_levels.Rmd', output_format = 'html_document', output_file = 'celltypes_results.html', params = list(mae_hdf5_dir_path = '${mae_path}', config_file = '${config_file}', references = '${references}'  ))"
+    Rscript -e  "rmarkdown::render('celltype_levels.Rmd', output_format = 'html_document', output_file = 'celltypes_results.html', params = list(mae_hdf5_dir_path = '${mae_path}', config_file = '${config_file}', references = '${references}'  ))"
     """
     
 }
@@ -104,7 +104,7 @@ process SINGLE_FEATURES {
 
     """
     cp -L $project_dir/bin/analyze_single_features.Rmd analyze_single_features.Rmd
-    Rscript -e  "rmarkdown::render(analyze_single_features.Rmd', output_format = 'html_document', output_file = 'single_features_results.html', params = list(mae_hdf5_dir_path = '${mae_path}', config_file = '${config_file}', references = '${references}'  ))"
+    Rscript -e  "rmarkdown::render('analyze_single_features.Rmd', output_format = 'html_document', output_file = 'single_features_results.html', params = list(mae_hdf5_dir_path = '${mae_path}', config_file = '${config_file}', references = '${references}'  ))"
     """
     
 }
