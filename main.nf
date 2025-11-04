@@ -69,6 +69,11 @@ workflow {
 	}
 
 
+	// Supplementary figures 
+	CELLTYPE_LEVELS(mae_object, r_config, references)
+	SINGLE_FEATURES(mae_object, r_config, references)
+	
+
 	// Single omics analyses
 	RUN_CV(mae_object, r_config, references)
 	//LINEAR_MODELS(params.mae_object, params.r_config, params.references)
@@ -76,6 +81,7 @@ workflow {
 
 	// Multi omics analyses
 	//RUN_MOFA(params.mae_object, params.r_config, params.references)
+	RIBOSOMAL_RNA_RANKS(mae_object, r_config, references)
 	//RUN_PLS2(params.mae_object, params.r_config, params.references)
 
 
