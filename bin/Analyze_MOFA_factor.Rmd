@@ -1,0 +1,75 @@
+---
+title: "Analyze_MOFA_factor"
+output: html_document
+date: '2025-07-11'
+params:
+  config_file: "config.yml"
+  input: "MOFA"
+  max_num_pathways: 10
+---
+
+
+## Load data
+
+Loadings (ranks) and feature metadata
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+
+# read paramters and config
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$PEA
+dir.create(outdir)
+
+# read input data
+input_data <- lapply(config$PEA_input[[params$input]], function(f) {
+  print(f)
+  df <- read.csv(file.path(f), row.names = 1)
+  print(head(df))
+  df
+})
+```
+
+## Proteomics IPP data
+```{r}
+Proteomics_IPP_weights <- input_data[["Proteomics-IPP"]]
+```
+
+## Factor 9 (aging)
+```{r}
+Proteomics_IPP_weights_Top_Factor9 <- Proteomics_IPP_weights[abs(Proteomics_IPP_weights$Factor9) > 2,]
+Proteomics_IPP_weights_Top_Factor9$UniProt
+```
+
+## RLM hits (Proteomics-IPP)
+```{r}
+rlm_sign_hits <- read.csv('RLM/signif_hits_combined.csv', row.names=1)
+
+## Proteomics hits
+rlm_sign_hits_Prot_IPP <- rlm_sign_hits[rlm_sign_hits$assay == 'Proteomics-IPP',]
+
+## Aging
+rlm_sign_hits_Prot_IPP_Aging <- rlm_sign_hits_Prot_IPP[rlm_sign_hits_Prot_IPP$outcome == 'Age',]
+
+intersection <- intersect(rlm_sign_hits_Prot_IPP_Aging$feature, rownames(Proteomics_IPP_weights_Top_Factor9))
+Proteomics_IPP_weights[intersection, "UniProt"]
+```
+
+## RLM hits (MassSpec Proteomics)
+```{r}
+## Proteomics hits
+rlm_sign_hits_Prot_MS <- rlm_sign_hits[rlm_sign_hits$assay == 'Proteomics | imputed missing values',]
+table(rlm_sign_hits_Prot_MS$outcome)
+```
+
+
+```{r}
+## Aging
+rlm_sign_hits_Prot_MS_AgingAcc <- rlm_sign_hits_Prot_MS[rlm_sign_hits_Prot_MS$outcome == 'Age_acc_BLUP',] ##  Zero
+
+intersect(rlm_sign_hits_Prot_MS_AgingAcc$feature, Proteomics_IPP_weights_Top_Factor9$UniProt)
+```
+

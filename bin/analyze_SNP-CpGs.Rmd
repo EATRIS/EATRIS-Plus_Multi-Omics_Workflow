@@ -1,0 +1,266 @@
+---
+title: "SNP-CpG_Prot-IPP"
+output: html_document
+params:
+  mae_hdf5_path: Z:/omics/MultiAssayExperiments/h5MAE/
+  outdir: "Z:/Results/2025_July_Rebuttal/"
+  rna_lm_results: 'Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/SNPcounts_RNApavalue_all.csv'
+---
+
+
+## Params
+The `MultiAssayExperiment` [@Ramos2017] contains preprocessed data and has been created with the *R* notebook `examples\create_MultiAssayExperiment.Rmd`.
+
+```{r read_multiassayexperiment}
+print(params)
+outdir <- params$outdir
+```
+
+
+## Read data and metadata: MultiAssayExperiment
+
+```{r}
+require(SummarizedExperiment)
+suppressWarnings(library(MultiAssayExperiment)) 
+
+
+mae <- loadHDF5MultiAssayExperiment(
+  dir = params$mae_hdf5_path, 
+  prefix = 'mae')
+#experiments(mae)
+```
+
+
+## Read files
+```{r}
+## SNP-CpG overlapping proteins that were associated with phenotypic traits
+SNPs_overlapping_prot <- read.csv(params$snps_overlapping_prot, row.names = 1)
+
+df_list <- lapply(unique(SNPs_overlapping_prot$Gene_symbol), function(x) {
+  SNP_coordinates <- SNPs_overlapping_prot[SNPs_overlapping_prot$Gene_symbol == x, "SNP_CpG"]
+  Chr <- SNPs_overlapping_prot[SNPs_overlapping_prot$Gene_symbol == x, "CHR"][[1]]
+  genotype_path <- file.path('Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB', paste0("Chr", Chr), paste0("snps_genotypes", Chr, '.csv'))
+  genotypes_df <- read.csv(genotype_path)
+  genotypes_df <- genotypes_df[genotypes_df$POS %in% SNP_coordinates ,]
+  genotypes_df
+})
+names(df_list) <- unique(SNPs_overlapping_prot$Gene_symbol)
+
+## Linear model output of SNP-CpGs and RNA levels
+rna_snp_counts <- read.csv(params$rna_lm_results)
+rna_snp_counts <- rna_snp_counts[rna_snp_counts$p_adjust_value < 0.05, ]
+```
+
+
+### RNAseq and Proteomics data
+```{r}
+get_data <- function(name_assay) {
+  se <- mae[[name_assay]]
+  df_wide <- data.frame(assay(se))
+  return(df_wide)
+}
+
+get_feature_metadata <- function(name_assay) {
+  se <- mae[[name_assay]]
+  df_wide <- as.data.frame(rowData(se))
+  return(df_wide)
+}
+
+RNA_assay <- "mRNA-seq-2 | batch-adjusted | vst"
+Proteomics_assay <- "Proteomics-IPP"
+
+RNAseq_data <- get_data(RNA_assay)
+proteomics_ipp_data <- get_data(Proteomics_assay)
+
+RNAseq_feature_metadata <- get_feature_metadata(RNA_assay)
+proteomics_ipp_feature_metadata <- get_feature_metadata(Proteomics_assay)
+```
+
+
+### Heatmap that shows how the genotypes of samples, the clusters show differences in RBL2 RNA levels
+- The bottom 3 SNPs are associated strongest with the RNA levels, these also show clearest separaton of samples
+```{r}
+# df_heatmap <- genotypes_df[,grepl('CZC', names(genotypes_df))]
+# rownames(df_heatmap) <- paste0("Chr_", genotypes_df$POS)
+# 
+# pheatmap::pheatmap(df_heatmap,
+#                    cluster_rows = T,
+#                    cluster_cols = T,
+#                    show_colnames = F)
+```
+
+
+### Function to compare protein levels of the different SNP groups (selection based on strongest associations)
+```{r}
+library(ggplot2)
+
+results <- list()
+
+proteomics_run_lm <- function(df, df_heatmap, ipp.id, gene, strongest_snp) {
+  df <- df[ipp.id, , drop = FALSE]
+  overlapping_cols <- intersect(names(df), names(df_heatmap))
+  if (length(overlapping_cols) == 0) return(NULL)
+
+  df_plot <- rbind(df_heatmap[, overlapping_cols], df[, overlapping_cols])
+  df_plot <- data.frame(t(df_plot))
+  if (!(strongest_snp %in% colnames(df_plot)) || !(ipp.id %in% colnames(df_plot))) return(NULL)
+
+  df_plot$SNP_CpG <- as.factor(df_plot[[strongest_snp]])
+  df_plot$ProteinValues <- df_plot[[ipp.id]]
+  df_plot$SNP_CpG_lm <- as.numeric(as.character(df_plot$SNP_CpG))
+  if (any(is.na(df_plot$SNP_CpG_lm))) return(NULL)
+
+  fit <- lm(ProteinValues ~ SNP_CpG_lm, data = df_plot)
+  coef <- summary(fit)$coefficients
+
+  beta <- coef["SNP_CpG_lm", "Estimate"]
+  se <- coef["SNP_CpG_lm", "Std. Error"]
+  pval <- coef["SNP_CpG_lm", "Pr(>|t|)"]
+
+  # Return result row
+  data.frame(
+    Gene = gene,
+    Prot_Id = ipp.id,
+    SNP = strongest_snp,
+    Beta = beta,
+    SE = se,
+    P = pval
+  )
+}
+
+
+```
+
+
+## Which proteins overlap with RNAseq features that were affected by SNP-CpGs?
+```{r}
+proteomics_lm_all <- lapply(unique(rna_snp_counts$Gene), function(ens_id) {
+  gene <- RNAseq_feature_metadata[RNAseq_feature_metadata$Ensembl_ID == ens_id, 'Gene_symbol']
+
+  genotypes_df <- df_list[[gene]] ##
+  if (is.null(genotypes_df)) return(NULL)
+
+  df_heatmap <- genotypes_df[, grepl('CZC', names(genotypes_df))]
+  rownames(df_heatmap) <- paste0("Chr_", genotypes_df$POS)
+
+  rna_snp_data <- rna_snp_counts[rna_snp_counts$Gene == ens_id, ]
+  if (nrow(rna_snp_data) == 0) return(NULL)
+
+  strongest_snp <- if (nrow(rna_snp_data) > 1) {
+    rna_snp_data$SNP_CpG[which.min(rna_snp_data$p_adjust_value)]
+  } else {
+    rna_snp_data$SNP_CpG
+  }
+
+  strongest_snp <- paste0("Chr_", strongest_snp)
+  seq.ids <- proteomics_ipp_feature_metadata[proteomics_ipp_feature_metadata$EntrezGeneSymbol == gene, "AptName"]
+  if (length(seq.ids) == 0) return(NULL)
+
+  # For each IPP ID, collect results
+  res_per_gene <- lapply(seq.ids, function(ipp.id) {
+    tryCatch({
+      proteomics_run_lm(
+        df = proteomics_ipp_data,
+        df_heatmap = df_heatmap,
+        ipp.id = ipp.id,
+        gene = gene,
+        strongest_snp = strongest_snp
+      )
+    }, error = function(e) NULL)
+  })
+
+  do.call(rbind, res_per_gene)
+})
+
+proteomics_lm_all <- do.call(rbind, proteomics_lm_all)
+proteomics_lm_all$P.adj <- p.adjust(proteomics_lm_all$P, method = "BH")
+```
+
+
+### Which of these proteins are also affected by the SNP-CpG?
+```{r}
+plot_sign_results <- function(lm_results, row_n, outdir2) {
+  row <- lm_results[row_n, ]
+    
+  gene <- row$Gene
+  ipp.id <- row$Prot_Id
+  strongest_snp <- row$SNP
+  padj <- signif(row$P.adj, 3)
+    
+  genotypes_df <- df_list[[gene]]
+  df_heatmap <- genotypes_df[, grepl('CZC', names(genotypes_df))]
+  rownames(df_heatmap) <- paste0("Chr_", genotypes_df$POS)
+    
+  df <- proteomics_ipp_data[ipp.id, , drop = FALSE]
+  overlapping_cols <- intersect(names(df), names(df_heatmap))
+  df_plot <- rbind(df_heatmap[, overlapping_cols], df[, overlapping_cols])
+  df_plot <- data.frame(t(df_plot))
+  df_plot$SNP_CpG <- as.factor(df_plot[[strongest_snp]])
+  df_plot$ProteinValues <- df_plot[[ipp.id]]
+  
+  p <- ggplot(df_plot, aes(x = SNP_CpG, y = ProteinValues)) +
+    geom_boxplot() +
+    scale_fill_brewer(palette = "Set2") +
+    ggtitle(paste0(gene, "\nAdjusted p = ", padj)) +
+    theme_bw()
+    
+  ggsave(file.path(outdir, outdir2, paste0(gene, "_", ipp.id, ".pdf")), p, width = 6, height = 4)
+  return(p)
+  
+}
+
+
+significant_results <- subset(proteomics_lm_all, P.adj < 0.05)
+
+for (i in seq_len(nrow(significant_results))) {
+  plot_sign_results(significant_results, i, 'SNP_CPG_Prot')
+}
+```
+
+
+
+## Same plots for RNAseq (TODO: Fix bug)
+```{r}
+library(dplyr)
+
+rna_snp_counts_sign_with_prot <- rna_snp_counts[rna_snp_counts$Gene %in% c('ENSG00000124588', 
+                                                                           'ENSG00000197253'),]
+# Get only strongest SNP
+rna_snp_counts_sign_with_prot <- rna_snp_counts_sign_with_prot %>%
+  group_by(Gene) %>%
+  slice_min(p_adjust_value, with_ties =F) %>%
+  ungroup()
+
+
+for (i in nrow(rna_snp_counts_sign_with_prot)) {
+  row <- rna_snp_counts_sign_with_prot[i, ]
+  
+  gene <- row$Gene
+  strongest_snp <- paste0("Chr_", row$SNP_CpG)
+  padj <-  signif(row$p_adjust_value, 3)
+  
+  gene_sym <- SNPs_overlapping_prot[SNPs_overlapping_prot$Gene == gene, "Gene_symbol"][[1]]
+  genotypes_df <- df_list[[gene_sym]]
+  df_heatmap <- genotypes_df[, grepl('CZC', names(genotypes_df))]
+  rownames(df_heatmap) <- paste0("Chr_", genotypes_df$POS)
+  
+  ## Prepare data frames
+  RNAseq_data <- data.frame(t(RNAseq_data))
+  df <- RNAseq_data[gene, , drop = FALSE]
+  overlapping_cols <- intersect(names(df), names(df_heatmap))
+  df_plot <- rbind(df_heatmap[, overlapping_cols], df[, overlapping_cols])
+  df_plot <- data.frame(t(df_plot))
+  df_plot$SNP_CpG <- as.factor(df_plot[[strongest_snp]])
+  df_plot$Gene <- df_plot[[gene]]
+
+  p <- ggplot(df_plot, aes(x = SNP_CpG, y = Gene)) +
+    geom_boxplot() +
+    scale_fill_brewer(palette = "Set2") +
+    ggtitle(paste0(gene_sym, "\nAdjusted p = ", padj)) +
+    theme_bw()
+  
+  ggsave(file.path(outdir, 'SNP_CPG_RNA', paste(gene, "_", i, ".pdf")), p, width = 6, height = 4)
+  print(p)
+  
+}
+```

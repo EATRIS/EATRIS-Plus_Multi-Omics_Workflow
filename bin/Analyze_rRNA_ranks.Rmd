@@ -1,0 +1,179 @@
+---
+title: "Analyze the effect of cell-types on mRNA-seq contributions to the MOFA factors"
+output: html_document
+params:
+  b_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_B-cells_Lineage.tsv"
+  den_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_Dendritic.tsv"
+  gra_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_Granulocytes_Lineage.tsv"
+  mon_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_Monocytes_Lineage.tsv"
+  nk_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_NK-cells_Lineage.tsv"
+  t_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_T-cells_Lineage.tsv"
+  
+  mrna_data: "Output/MOFA/MOFA_RNAseq.xlsx"
+---
+
+## Libraries
+```{r}
+library(ggplot2)
+```
+
+
+### Params
+```{r}
+print(params)
+```
+
+
+## Read mRNA-seq MOFA factor weights
+```{r}
+mrna_weights <- read.csv('Output/MOFA/factorweights_mRNA-seq-2___batch-adjusted___vst___corrected.csv', row.names=1)
+mrna_mapping <- readxl::read_xlsx('Output/MOFA/MOFA_RNAseq.xlsx')
+
+head(mrna_weights[1:5,1:5])
+
+number_factors <- ncol(mrna_weights)
+```
+
+## Functions
+```{r}
+
+#
+plot_ranks <- function(data, celltype_genes_df, n_factor) {
+  
+  #
+  celltype_genes <- celltype_genes_df$Ensembl
+  celltype <- deparse(substitute(celltype_genes_df))
+  
+  # Rank
+  data <- data[order(data[, n_factor], decreasing = TRUE),]
+  
+  # Add rank column
+  data$gene_rank <- seq(1:nrow(data))
+  
+  # Get cell type-specific genes ranks
+  ranks <- lapply(celltype_genes, function(x) {
+    rank <- data[x, 13]
+    rank
+  })
+  
+  # Create dataframe for histogram
+  df <- data.frame(as.character(ranks), celltype_genes)
+  colnames(df) <- c('rank', 'ensembl')
+  df$rank <- as.numeric(df$rank)
+  df <- na.omit(df)
+  
+  # Histogram
+  n_genes <- nrow(df)
+  title <- paste0('Factor ', n_factor, '\n', celltype, ' (', n_genes, ' genes)')
+  plt <- ggplot(df, aes(x=rank)) +
+      geom_histogram(color="darkblue", 
+                     fill = "lightblue",
+                     bins = 100) +
+      labs(title= title, x='Gene rank')
+  return(plt)
+}
+``` 
+
+
+## Protein Atlas
+
+### Read cell type levels
+```{r}
+B_cells <- read.delim(params$b_cells)
+Dendritic_cells <- read.delim(params$den_cells)
+Granulocytes <- read.delim(params$gra_cells)
+Monocytes <- read.delim(params$mon_cells)
+NK_cells <- read.delim(params$nk_cells)
+T_cells <- read.delim(params$t_cells)
+```
+
+
+## Histograms
+
+### B-cells
+```{r, warning=FALSE}
+library(gridExtra)
+library(grid)
+
+plot_rankings_grid <- function(data, celltype) {
+  
+  plot_list <- lapply(seq(1, number_factors), function(x) 
+    {plot_ranks(mrna_weights, data, x)}
+  )
+  
+  n <- length(plot_list)
+  nrow <- ceiling(n /2)
+  pdf(paste0(celltype, "_rankings.pdf"), width = 2 * nrow, height = 3 * nrow)
+  do.call(grid.arrange, c(
+    plot_list,             
+    list(
+      ncol = 2,
+      padding=unit(0.5, "cm"),
+      top = textGrob(celltype,
+                     gp =gpar(fontsize=20)
+                     )
+      )
+  ))
+  
+  dev.off()
+}
+
+
+plot_rankings_grid(B_cells, 'Bcells')
+```
+
+
+### T-cells
+```{r, warning=FALSE}
+plot_rankings_grid(T_cells, 'Tcells')
+```
+
+
+### Dendritic cells
+```{r, warning=FALSE}
+plot_rankings_grid(Dendritic_cells, 'Den_cells')
+```
+
+
+### Granulocytes
+```{r, warning=FALSE}
+plot_rankings_grid(Granulocytes, 'Gran')
+```
+
+
+### Monocytes
+```{r, warning=FALSE}
+plot_rankings_grid(Monocytes, 'Mono')
+```
+
+
+### Natural Killer cells
+```{r, warning=FALSE}
+plot_rankings_grid(NK_cells, 'NK')
+```
+
+
+
+## RPL/RPS genes
+
+### List of Ribosomal protein genes
+```{r}
+ribo_list <- c("RPS17", "RPL17", "RPS10", "RPL36A", "RPS9", "RPL26", "RPL30", "RPS15A", "RPS25", "RPS29", "RPL34", "RPL41", "RPL24", "RPS7", "RPL27", "UBA52", "RPL21", "RPS13", "RPL27A", "RPS20", "RPS11", "RPL37", "RPL15", "RPL9", "RPL18", "RPS16", "RPL39", "RPS24", "RPL38", "RPL37A", "RPS28", "RPL7", "RPL8", "RPS3", "RPL35A", "RPL12", "RPL11", "RPS27", "RPLP2", "RPL10", "RPL18A", "RPS2", "RPL14", "RPL23A", "RPL35", "RPSA", "RPL13", "RPS6", "RPLP1", "RPL32", "RPL36", "RPS12", "RACK1", "RPS18", "RPS14", "RPL19", "RPL3", "RPS26", "RPS23", "RPL10A", "RPL28", "RPL5", "RPL4", "RPL7A", "RPS15", "RPS21", "RPL31", "RPL6", "RPLP0", "RPL23", "RPL13A", "RPL29", "RPS8") 
+
+Ensembl_ids <- lapply(ribo_list, function(x) {
+  ensembl_id <- mrna_mapping[mrna_mapping$Gene_symbol == x, "X"]
+  ensembl_id
+})
+
+RPL_RPS <- mrna_mapping[mrna_mapping$Gene_symbol %in% ribo_list,]
+RPL_RPS$Ensembl <- RPL_RPS$X
+```
+
+
+### Histogram
+```{r, warning=FALSE}
+plot_rankings_grid(RPL_RPS, 'Ribo')
+```
+
+
+

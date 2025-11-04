@@ -1,0 +1,297 @@
+---
+title: "Single_mol_features_analysis"
+author:
+- Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+params:
+  config_file: "config.yml"
+  rlm_sign_hits: "Z:/Results/2025_July_Rebuttal/RLM/RLM_signif_hits.csv"
+  color_theme: "Z:/omics/EM-seq_UU/analysis/themes_and_colors.R"
+---
+
+## Libraries
+```{r, warning=F, message=F}
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(rstatix)
+library(MultiAssayExperiment)
+library(HDF5Array)
+library(dplyr)
+library(smplot2)
+library(patchwork)
+```
+
+## Themes and colors
+```{r}
+source(params$color_theme)
+```
+
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$FEATURES
+#dir.create(outdir)
+```
+
+
+## Read input data 
+Input data is a MultiAssayExperiment (MAE) object. 
+```{r}
+library(MultiAssayExperiment)
+library(HDF5Array)
+
+mae <- loadHDF5MultiAssayExperiment(dir = config$mae_hdf5_dir_path, 
+                                     prefix = config$mae_hdf5_prefix)
+```
+
+
+## Get omics names list
+```{r}
+assay_names <- config$experiment_names$PCA
+
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
+
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
+
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
+)
+
+print(assay_names_df)
+```
+
+
+```{r}
+protein_mappings <- read.csv('Z:/omics/Proteomics_IMTM/Upload_2023-03-03/Protein_mappings.csv', sep = ';')
+protein_ipp_mapping <- read.delim('Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_featureAnnotation.txt')
+mrna_mappings <- read.csv('Z:/omics/mRNAseq_FIMM/Mapping2Gene_symbol/Ensembl_mappings_Deseq.csv', row.names = 1)
+lipid_mappings <- read.csv('Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_POS_EATRIS_20220902_MetaDataFeature.txt', sep ='\t')
+```
+
+
+## Functions used to retrieve data from MAE
+```{r}
+## Function to read omics data from MAE into a scaled dataframe
+## 
+## @param mae_object MultiAssayExperiment object
+## @param name_assay Name of omics data type
+## @return List of omics measurements
+read_omics_from_mae <- function(mae_object, name_assay){
+  se <- mae_object[[name_assay]]
+  df_wide <- data.frame(t(assay(se)))
+  df_wide <- df_wide[ , colSums(is.na(df_wide))==0]
+  df_wide
+}
+```
+
+
+## Make list of assays
+```{r}
+assay_list <- lapply(assay_names, function(assay_name) {
+  df_wide <- read_omics_from_mae(mae, assay_name)
+  }) 
+names(assay_list) <- assay_names
+```
+
+
+### Phenotype data 
+```{r}
+pheno_df <- data.frame(colData(mae))
+```
+
+
+### Functions for plots
+```{r}
+source('../SupportFunctions/ViolinPlot.R')
+source('../SupportFunctions/PlotCor2.R')
+```
+
+
+## Plot interesting metabolites
+```{r}
+mtblmcs <- assay_list[["Amino acids | batch-adjusted | imputed missing values"]]
+mtblmcs$Sex <- pheno_df$Sex
+mtblmcs$Ratio_Leu_Ser <- log(mtblmcs$L.Leucine + 1) / log(mtblmcs$L.Serine + 1)
+
+metabolites <- c('L.Leucine', 'L.Serine', 'Ratio_Leu_Ser')
+
+plot_list <- lapply(metabolites, function(feature) {
+  plot_violin_unified(
+    data = mtblmcs,
+    x_var = "Sex",
+    y_var = feature,
+    palette = "jco"
+  )
+})
+
+pdf("Z:/Results/2025_July_Rebuttal/MetabolitesSex.pdf", width = 10, height = 10)
+do.call(grid.arrange, c(plot_list, ncol = 2))
+dev.off()
+```
+
+
+## Fatty acids sex differences
+```{r}
+vlcfa <- assay_list[["Very long chain fatty acids | batch-adjusted"]]
+vlcfa$Sex <- pheno_df$Sex 
+vlcfa$Ratio_Phy_Pri <- log(vlcfa$Pristanic.acid + 1) / log(vlcfa$Phytanic.acid + 1)
+
+
+metabolites <- c('Pristanic.acid', "Phytanic.acid", 'Ratio_Phy_Pri')
+
+plot_list <- lapply(metabolites, function(feature) {
+  plot_violin_unified(
+    data = vlcfa,
+    x_var = "Sex",
+    y_var = feature,
+    palette = "jco"
+  )
+})
+
+pdf("Z:/Results/2025_July_Rebuttal/VLCFASex.pdf", width = 10, height = 10)
+do.call(grid.arrange, c(plot_list, ncol = 2))
+dev.off()
+```
+
+# Ageing
+
+### Load significant hits from linear model
+```{r}
+rlm_sign_hits <- read.csv(params$rlm_sign_hits)
+
+rlm_sign_hits_Acc_BLUP <- rlm_sign_hits[rlm_sign_hits$outcome == 'Age_acc_BLUP',]
+rlm_sign_hits_Acc_Levine <- rlm_sign_hits[rlm_sign_hits$outcome == 'Age_acc_Levine',]
+```
+
+
+## Age acceleration BLUP
+```{r}
+mrna <- assay_list[["mRNA-seq"]]
+```
+
+```{r}
+
+plot_cor2 <- function(input_df) {
+  
+  ## Determine number of rows (number of significant associations)
+  rows <- (1 : nrow(input_df))
+
+  ## Iterate over rows and plot correlations
+  for (i in rows){
+    
+    ## Feature and Assay names
+    assay <- input_df[i, 'assay']
+    assay_name <- strsplit(assay, ' | ')[[1]][[1]]
+    feature <- input_df[i, 'feature']
+    feature_name <- feature
+    
+
+    # Add protein name or gene symbol if applicable
+    if (startsWith(assay, 'Proteomics-IPP')) {
+      feature2 <- protein_ipp_mapping[protein_ipp_mapping$AptName == feature, "TargetFullName"]
+      if (nchar(feature2) > 50) {
+        feature2 <- substr(feature2, 1, 30)
+      }
+
+      feature_name <- paste0(feature_name, '\n', feature2)
+    }
+    
+    else if (startsWith(assay, 'Proteomics')) {
+      feature2 <- protein_mappings[protein_mappings$Feature == feature, 2]
+      if (nchar(feature2) > 40) {
+        feature2 <- substr(feature2, 1, 30)
+      }
+
+      feature_name <- paste0(feature_name, '\n', feature2)
+    }
+    
+    else if (startsWith(assay, 'mRNA')) {
+      feature2 <- mrna_mappings[mrna_mappings$ensembl_IDs == feature, 2]
+      feature_name <- paste0(feature_name, '\n', feature2)
+    }
+    
+    else if (startsWith(assay, 'Lipidomics')) {
+      feature2 <- lipid_mappings[lipid_mappings$IMTM_Feature_ID == feature, 2]
+      feature_name <- paste0(feature_name, '\n', feature2)
+    }
+    
+    
+    # Retrieve -omics data
+    omics <- assay_list[[assay]]
+    
+    # Subset pheno df on row names in omics data
+    pheno_df <- pheno_df[rownames(omics),]
+    
+    # Add Age and Outcome columns to omics data frame
+    ## Outcome
+    omics$Age <- pheno_df[, 'Age']
+    omics$BLUP_outcome <- pheno_df[, 'Age_acc_BLUP']
+    omics$Levine_outcome <- pheno_df[, 'Age_acc_Levine']
+    omics$y_feature <- omics[, feature]
+
+    data_plot <- omics[, c('Age', 'BLUP_outcome', 'Levine_outcome', 'y_feature')]
+    
+    # Make numeric columns
+    data_plot$Levine_outcome <- as.numeric(as.character(data_plot$Levine_outcome))
+    data_plot$BLUP_outcome <- as.numeric(as.character(data_plot$BLUP_outcome))
+    
+    data_long <- data_plot %>%
+       gather(key = "variable", value = "value", Age, BLUP_outcome, Levine_outcome)
+      
+    custom_labeller <- as_labeller(c(Age = "Age", BLUP_outcome = 'Age acc. BLUP', Levine_outcome = 'Age acc. Levine'))
+    
+    plt1 <- ggplot(data_long, aes(x = y_feature, y = value, fill=variable)) +
+      geom_point() +
+      geom_smooth(method = 'lm', col = 'red', se = FALSE) +
+      geom_point(shape=21)+
+      scale_fill_discrete(color_palette_discrete)+
+      facet_wrap(~variable, labeller = custom_labeller) +
+      sm_statCorr() +
+      xlab(feature_name)+
+      set_theme+
+      theme(legend.position = "none") +
+      facet_wrap(~variable, scales = "free_y", labeller = custom_labeller) +
+      ylab("Age / Age acceleration")
+    
+    ggsave(plt1, filename = paste0(feature, "_", "_age_acc_cor.pdf"))    
+    print(plt1)
+  }
+}  
+
+```
+
+## New plot grids with BLUP acc
+```{r}
+plot_cor2(rlm_sign_hits_Acc_BLUP)
+```
+
+
+## New plot grids with Levine acc
+```{r}
+plot_cor2(rlm_sign_hits_Acc_Levine)
+```
+
+
+```{r}
+sessionInfo()
+```

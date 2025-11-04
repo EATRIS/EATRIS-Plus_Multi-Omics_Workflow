@@ -1,0 +1,635 @@
+---
+title: "Pathway enrichment enrichment analysis"
+author:
+  - Anna Niehues^[Radboud university medical center, Anna.Niehues@radboudumc.nl]
+output:
+  html_document:
+    df_print: paged
+bibliography: references.bib
+params:
+  config_file: "config.yml"
+  input: "MOFA"
+  max_num_pathways: 10
+---
+
+Perform pathway enrichment analysis (PEA) based on latent variables composed of
+omics features.
+PEA is performed per omics and p-values are aggregated across omics using the R
+packages fgsea [@Korotkevich2019] and multiGSEA [@Canzler2020].
+Notebook parameters
+
+input_type: choice of "MOFA", "DIABLO"
+max_num_pathways: max. number of pathways to be plotted
+
+## Load data
+
+Loadings (ranks) and feature metadata
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+
+# read paramters and config
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$PEA
+dir.create(outdir)
+
+# read input data
+input_data <- lapply(config$PEA_input[[params$input]], function(f) {
+  print(f)
+  df <- read.csv(file.path(f), row.names = 1)
+  print(head(df))
+  df
+})
+```
+
+
+
+
+Determine omics types from data set name
+
+**TODO:** add other omics types (transcriptomics, etc.)
+
+```{r}
+# Lipidomics - not included in PEA
+grepl("Lipidom", names(input_data))
+# Metabolomics
+metabolome_assays <- names(input_data)[grepl(
+  "Amino|Acylcarn|Very long chain fatty acid|Metabolom", names(input_data))]
+names(metabolome_assays) <- metabolome_assays
+# Proteomics
+proteome_assays <- names(input_data)[grepl("Proteom", names(input_data))]
+names(proteome_assays) <- proteome_assays
+# Transcriptomics
+transcriptome_assays <- names(input_data)[grepl("mRNA", names(input_data))]
+names(transcriptome_assays) <- transcriptome_assays
+
+omics_layers <- c()
+assay_names <- c()
+if (length(metabolome_assays) > 0) {
+  omics_layers <- c(omics_layers, "metabolome")
+  assay_names <- c(assay_names, metabolome_assays)
+}
+if (length(proteome_assays) > 0) {
+  omics_layers <- c(omics_layers, "proteome")
+  assay_names <- c(assay_names, proteome_assays)
+}
+if (length(transcriptome_assays) > 0) {
+  omics_layers <- c(omics_layers, "transcriptome")
+  assay_names <- c(assay_names, transcriptome_assays)
+}
+
+names(assay_names) <- assay_names
+assay2layer <- c(sapply(metabolome_assays, function(a) {"metabolome"}), 
+                 sapply(proteome_assays, function(a) {"proteome"}),
+                 sapply(transcriptome_assays, function(a) {"transcriptome"}))
+
+assay2layer
+```
+
+
+## Get pathways
+
+
+Pathways for different omics are loaded with `multiGSEA` [@Canzler2020].
+
+https://bioconductor.org/packages/release/bioc/vignettes/multiGSEA/inst/doc/multiGSEA.html
+
+```{r}
+library(multiGSEA)
+library(org.Hs.eg.db)
+
+metabolomics_id_type <- "HMDB"
+proteomics_id_type <- "UNIPROT"
+transcriptomics_id_type <- "ENSEMBL"
+
+# get pathways
+pathways <- getMultiOmicsFeatures(
+  #dbs = config$PEA_databases, # KEGG, Reactome, ..., all
+  dbs = c('kegg', 'wikipathways' 
+          #'panther', 
+          #'pharmgkb'
+          ),
+  #dbs = c('reactome'),
+  layer = omics_layers,
+  returnTranscriptome = transcriptomics_id_type,
+  returnProteome = proteomics_id_type,
+  returnMetabolome = metabolomics_id_type, 
+  organism = "hsapiens",
+  useLocal = F)
+
+# see first few pathways
+lapply(1:length(pathways), function(l) { head(pathways[[l]], 1) })
+
+# use original names of omics types
+pathways <- lapply(assay_names, function(name) {
+  pathways[[assay2layer[[name]]]]
+})
+
+```
+
+## Map database identifiers 
+
+The R/Bioconductor implementation `BridgeDbR` [@BridgeDbR] of the
+BridgeDb [@VanIersel2010] framework is used to map identifiers of molecular
+entities (omics features) between different databases.
+
+See https://bridgedb.github.io/ for a general documentation and
+https://bioconductor.org/packages/release/bioc/html/multiGSEA.html for the
+documentation of BridgDbR.
+
+### Download BridgeDB database
+
+For usage of `BridgDbR` for metabolomics data, see the tutorial:
+https://www.bioconductor.org/packages/release/bioc/vignettes/BridgeDbR/inst/doc/tutorial.html#4_Metabolomics
+
+It is necessary to download the Metabolite `BridgeDb` ID Mapping Database from https://www.bridgedb.org/data/gene_database/.
+Version 20220707 [@MetaboliteBridgeDbIDMappingDatabase] is used in this analysis.
+
+For alternative options of ID mapping using the BridgDb API, check the BridgeDb website.
+
+```{r}
+# library(BridgeDbR)
+# 
+# mtbl_db_path <- here::here("C:/Users/Z896216/Documents/metabolites_20220707.bridge")
+# mapper <- loadDatabase(mtbl_db_path)
+
+
+#gene_db_path <- here::here("examples", "genes_20230506.bridge")
+#gene_mapper <- loadDatabase('C:/Users/manZ896216/Documents/Git/eatrisplus_omics_tools/examples/genes_20230506.bridge')
+```
+Check https://www.bridgedb.org/pages/system-codes.html for database resources
+
+Metabolite resources
+* Ca	CAS
+* Ce	ChEBI
+* Cs	ChemSpider
+* Cl	ChEMBL compound
+* Dr	DrugBank
+* Ch	HMDB
+* Gpl	Guide to Pharmacology Ligand ID (aka IUPHAR)
+* Ik	InChIKey
+* Ck	KEGG Compound
+* Kd	KEGG Drug
+* Kl	KEGG Glycan
+* Lm	LIPID MAPS
+* Lb	LipidBank
+* Pgd	PharmGKB Drug
+* Cpc	PubChem Compound
+* Cps	PubChem Substance
+* Sl	SwissLipids
+* Td	TTD Drug
+* Wd	Wikidata
+* Wi	Wikipedia
+
+
+
+## Mapping of miRNA data (not working yet)
+
+```{r}
+#gene_mapper <- loadDatabase("C:/Users/Z896216/Documents/Hs_Derby_Ensembl_108.bridge")
+
+# Data in right format
+# mirna_data <- input_data$`miRNA-seq, mature | batch-adjusted | corrected`
+# mirna_data <- mirna_data$miRBase.accession
+# mirna_data <- data.frame(c(mirna_data))
+# mirna_data$source  = 'Mbm'
+# colnames(mirna_data) <- c('identifier', 'source')
+
+
+#location <- getDatabase("Homo sapiens") #Download database
+#mapper <- loadDatabase(location)
+#mirna_data_mappings <- maps(mapper, mrna_data)
+```
+
+
+
+
+
+### Map reported metabolite ID to HMDB, ChEBI and KEGG Compound ID
+
+```{r}
+map_metabolite_ids <- function(compactIdentifier) {
+
+  source <- ifelse(startsWith(compactIdentifier, "hmdb:"), "Ch",
+                   ifelse(startsWith(compactIdentifier, "chebi:"), "Ce", NA))
+  if (!is.na(source)) {
+    hmdb_id <- tryCatch({
+      map(mapper, source = source,
+          compactIdentifier = compactIdentifier, target = "Ch")$mapping
+    }, error = function(error_meesage) {return(NA)})
+    if (length(hmdb_id) > 1) {
+      hmdb_id <- hmdb_id[nchar(hmdb_id) == 11]
+    }
+    chebi_id <- tryCatch({
+      map(mapper, source = source,
+          compactIdentifier = compactIdentifier, target = "Ce")$mapping
+    }, error = function(error_meesage) {return(NA)})
+    if (length(chebi_id) > 1) {
+      chebi_id <- chebi_id[!startsWith(chebi_id, "CHEBI:")]
+    }
+    kegg_id <- tryCatch({
+      map(mapper, source = source,
+          compactIdentifier = compactIdentifier, target = "Ck")$mapping
+    }, error = function(error_meesage) {return(NA)})
+  } else {
+    hmdb_id <- chebi_id <- kegg_id <- NA
+  }
+  
+  ## Don't map IDs, as mapping is not working
+  if(startsWith(compactIdentifier, "hmdb:")) {
+    hmdb_id <- compactIdentifier
+  }
+  else {
+    hmdb_id <- NA
+  }
+  
+  if(startsWith(compactIdentifier, "chebi:")) {
+    chebi_id <- compactIdentifier
+  }
+  else {
+    chebi_id <- NA
+  }
+  list(HMDB = hmdb_id, ChEBI = chebi_id, KEGG.Compound = kegg_id)
+}
+
+# add columns to input data - HMDB IDs
+input_data[metabolome_assays] <- lapply(metabolome_assays, function(assay_name) {
+  input_data[[assay_name]] <- cbind(
+    input_data[[assay_name]],
+    do.call(rbind, apply(input_data[[assay_name]], 1, function(row) {
+      dbid <- row[["database_identifier"]]
+      if (dbid == "chebi:17027") {
+        dbid <- "hmdb:HMDB0001263"
+      } else if (dbid == "chebi:49015") {
+        dbid <- "hmdb:HMDB0012130"
+      } else if (dbid == "hmdb:HMDB0000201") {
+        dbid <- "chebi:57589"
+      } else if (dbid == "chebi:86492") { # C5-acylcarnitine
+        # "chebi:73026", "chebi:86492", "chebi:73025", "chebi:86492"
+        dbid <- "hmdb:HMDB0000378" # 2-Methylbutyroylcarnitine (one of 4 possibilities)
+      } else if (dbid == "chebi:86490") { # C4-acylcarnitines
+        dbid <- "chebi:7676"        # O-butanoylcarnitine (one of 2 possibilities)
+      } else {
+        #print(dbid)
+      }
+      mapping_results <- map_metabolite_ids(dbid)
+      mapping_results <- as.data.frame(mapping_results)
+      stopifnot(nrow(mapping_results) == 1)
+      mapping_results
+    }))
+  )
+})
+
+
+HDMB_columns <- lapply(metabolome_assays, function(assay_name) {
+   metabolite_identifications <- input_data[[assay_name]]$database_identifier
+   HMDB_col <- lapply(metabolite_identifications, function(x) {
+     hmdib_id <- ifelse(startsWith(x, "hmdb:"), substring(x, 6, nchar(x)), NA)
+   })
+ })
+
+input_data$`Very long chain fatty acids | batch-adjusted`$HMDB <- HDMB_columns[[1]]
+input_data$`Acylcarnitines | batch-adjusted | imputed missing values`$HMDB <- HDMB_columns[[2]]
+input_data$`Amino acids | batch-adjusted | imputed missing values`$HMDB <- HDMB_columns[[3]]
+```
+
+
+### Protein IDs
+
+```{r}
+input_data[proteome_assays] <- lapply(proteome_assays, function(assay_name) {
+  input_data[[assay_name]]$UNIPROT <- input_data[[assay_name]]$Accession
+  if ('UniProt' %in% names(input_data[[assay_name]])) {
+    input_data[[assay_name]]$UNIPROT <- input_data[[assay_name]]$UniProt
+  }
+  input_data[[assay_name]]
+})
+```
+
+
+### Transcript IDs
+
+```{r}
+input_data[transcriptome_assays] <- lapply(transcriptome_assays, function(assay_name) {
+  #TODO ENSEMBL ID column is added here. Perhaps do this earlier.
+  input_data[[assay_name]]$Accession <- rownames(input_data[[assay_name]])
+  input_data[[assay_name]]$ENSEMBL <- input_data[[assay_name]]$Accession
+  input_data[[assay_name]]
+})
+```
+
+
+### MANNUALLY ADD EM-SEQ TO TRANSCRIPTOMICS NAMES
+```{r}
+# transcriptome_assays <- c(transcriptome_assays, 'EM-seq')
+# names(transcriptome_assays) <- transcriptome_assays
+# 
+# assay_names <- c(assay_names, 'EM-seq')
+# names(assay_names) <- assay_names
+# 
+# 
+# assay2layer <- c(sapply(metabolome_assays, function(a) {"metabolome"}), 
+#                  sapply(proteome_assays, function(a) {"proteome"}),
+#                  sapply(transcriptome_assays, function(a) {"transcriptome"}))
+# 
+# # use original names of omics types
+# pathways <- lapply(assay_names, function(name) {
+#   pathways[[assay2layer[[name]]]]
+# })
+```
+
+## Create named lists of ranking metric
+
+Input for a pathway enrichment analysis is a list of omics feature ranks named with the database IDs.
+
+These database IDs have to be the same that are used in the pathway lists.
+Here, one list is created per factor (MOFA) or component (DIABLO).
+
+```{r}
+components <- config$PEA_rankings[[params$input]]
+names(components) <- components
+
+omics_data <- lapply(components, function(comp) {
+  # metabolomics, hmdb IDs
+  # ranking: loading value
+  l <- lapply(metabolome_assays, function(a) {
+    ranks <- input_data[[a]][, comp]
+    names(ranks) <- input_data[[a]][, metabolomics_id_type]
+    # remove entries that cannot be mapped to database ID
+    ranks[!is.na(input_data[[a]][, metabolomics_id_type])]
+  })
+  
+  # # proteomics, uniprot IDs
+  l <- c(l, lapply(proteome_assays, function(a) {
+    ranks <- input_data[[a]][, comp]
+    names(ranks) <- input_data[[a]][, proteomics_id_type]
+    ranks
+  }))
+  
+   # # transcriptomics, ENSEMBL IDs
+  l <- c(l, lapply(transcriptome_assays, function(a) {
+    ranks <- input_data[[a]][, comp]
+    names(ranks) <- input_data[[a]][, transcriptomics_id_type] 
+    # remove entries that cannot be mapped to database ID
+    ranks[!is.na(input_data[[a]][, transcriptomics_id_type])]
+  }))
+  l
+})
+```
+
+
+## Pathway enrichment analysis
+
+Perform pathway enrichment analysis per omics and component.
+
+The function `multiGSEA::multiGSEA()` [@Canzler2020] which employs
+`fgsea::fgseaMultilevel()` [@Korotkevich2019] is modified to be able to change
+parameters of `fgsea::fgseaMultilevel()`.
+
+```{r, warning=FALSE}
+multiGSEA_new <- function(pathways, ranks, eps = 1e-100, scoreType = "std") {
+  # function modifed from multiGSEA::multiGSEA 
+  # Canzler, Sebastian and Hackermüller, Jörg: multiGSEA: A GSEA-based pathway 
+  # enrichment analysis for multi-omics data. BMC Bioinformatics 21, 561 (2020).
+  # https://doi.org/10.1186/s12859-020-03910-x
+  # allows to change parameters of fgsea::fgseaMultilevel because
+  # eps=0 (boundary to calculate p-value) can result in very long running times
+  # note that scoreType = "std" test both directions of ranked list
+  require(fgsea)
+
+  # Go through all omics layers
+  es <- lapply(names(pathways), function(omics) {
+      fgseaMultilevel(pathways = pathways[[omics]], stats = ranks[[omics]], 
+                      eps = eps, scoreType = scoreType)
+  })
+
+  names(es) <- names(pathways)
+
+  return(es)
+}
+
+enrichment_scores <- lapply(omics_data, function(omics) {
+  multiGSEA_new(pathways, omics)
+})
+```
+
+
+### Plot significantly enriched pathways per omics and component
+
+```{r}
+require(ggplot2)
+require(stringr)
+
+max_num_pathways <- params$max_num_pathways
+#max_num_pathways <- 20
+
+
+prepare_sign_hits_df <- function(df) {
+  
+  return(df)
+}
+
+
+lapply(components, function(comp) {
+  lapply(assay_names, function(name) {
+    # extract significantly enriched pathways
+    df <- enrichment_scores[[comp]][[name]]
+    df$rank <- -log10(df$pval)*abs(df$NES)
+    df.signif <- df[df$padj < 0.05, ]
+
+    
+    if (nrow(df.signif) > 0) {
+      # subset results for plotting if too many significant pathways
+      
+      # Remove pathways that share the same leading edge genes
+      df.signif <- df.signif[!duplicated((as.character(df.signif$leadingEdge))),]
+      
+      # Add column indicating negative or positive enrichment
+      df.signif$Enrichment <- NA
+      enrichment_col <- lapply(df.signif$NES, function(x){
+      if (x > 0) {
+         value <- 'Positively associated'
+      }
+      else {
+         value <- 'Negatively associated'
+      }
+      value
+      })
+      df.signif$Enrichment <- as.character(enrichment_col)
+      
+      if (nrow(df.signif) > max_num_pathways) {
+      # Make separate df for negative and positive enrichments
+        df.signif_pos <- df.signif[df.signif$NES > 0, ]
+        df.signif_neg <- df.signif[df.signif$NES < 0, ]
+        
+        # Add column indicating negative or positive
+        # df.signif_pos$Enrichment <- rep('Activated', nrow(df.signif_pos))
+        # df.signif_neg$Enrichment <- rep('Surpressed', nrow(df.signif_neg))
+      
+      
+        # Order based on NES
+        df.signif_pos <- df.signif_pos[order(NES, decreasing = T),][1:5,]
+        df.signif_neg <- df.signif_neg[order(NES, decreasing = F),][1:5,]
+        
+        # Bind data frames
+        df.signif <- rbind(df.signif_pos, df.signif_neg)
+        df.signif <- na.omit(df.signif)
+      }
+      
+      # Add Gene ratio column
+      gene_ratios <- lapply(seq(1, length(df.signif$leadingEdge)), function(x) { 
+      leadingedge <- df.signif[x,8]
+      leadingedge_n <- length(leadingedge[[1]][[1]])
+      size <- df.signif[x,7]
+      gene_ratio <- as.numeric(leadingedge_n) / as.numeric(size) 
+      round(gene_ratio, digits = 3)
+      })
+      df.signif$GeneRatio <- as.numeric(as.character(gene_ratios))
+  
+
+      #order pathways by normalized enrichment score
+      df.signif$pathway <- factor(
+        stringr::str_wrap(df.signif$pathway, width = 50),
+        levels = stringr::str_wrap(df.signif$pathway, width = 50)[order(df.signif$NES)],
+        ordered = T)
+      
+      
+      # Shorter title
+      name <- str_split(name, pattern = ' | ')[[1]][[1]]
+      title <- paste0(name, ", ", comp)
+
+      
+      # Plot NES
+      ggp <- ggplot(df.signif) +
+          geom_segment(aes(y = pathway, x = GeneRatio, xend = 0, yend = pathway)) +
+          geom_point(aes(y = pathway, x = GeneRatio, fill=padj, size = size), shape = 21) +
+          scale_fill_viridis_c() +
+          facet_grid(Enrichment ~ ., scales = "free", space = "free") +
+          ggtitle(title)
+      
+      
+      ggsave(file.path(outdir,
+                       paste0("PEA_", comp, "_", gsub("[ |,]", "_", name), ".png")),
+             ggp, width = 15, height = 10.46, unit = "cm", dpi = 300)
+      ggp
+      
+    }
+  })
+})
+
+```
+
+## LeadingEdge genes, translate ENSEMBL to Gene Symbols (mRNA-seq)
+```{r}
+RNA_mapping_table <- read.csv('c:/Users/Z896216/Documents/factorweights_mRNA-seqcsv.csv', row.names=1)
+
+lapply(components, function(comp) {
+  # Extract enriched pathways
+  df <- enrichment_scores[[comp]][[transcriptome_assays]]
+  df$rank <- -log10(df$pval) * abs(df$NES)
+  df.signif <- df[df$padj < 0.05, ]
+
+  if (nrow(df.signif) > 0) {
+    # Map leading edge gene IDs to symbols
+    df.signif$leadingEdge_Symbols <- sapply(df.signif$leadingEdge, function(genes) {
+      genes_clean <- gsub("\n", "", genes)
+      symbols <- RNA_mapping_table[genes_clean, 'Gene_symbol']
+      paste(symbols, collapse = ", ")  # or use list(symbols) if you want a list
+    })
+  } else {
+    df.signif$leadingEdge_Symbols <- character(0)
+  }
+
+  df.signif$leadingEdge <- NULL
+  file_path <- sprintf("C:/Users/Z896216/Documents/mRNA-seq-%s.csv", comp)
+  write.csv(df.signif, file = file_path, row.names = FALSE)
+})
+
+```
+
+
+
+### Aggregate p-values across omics
+
+`MultiGSEA::combinePvalues()` aggregates p-values across all omics types.
+
+
+```{r}
+aggregated_pval <- lapply(components, function(comp) {
+  df <- extractPvalues(enrichmentScores = enrichment_scores[[comp]],
+                       pathwayNames = names(pathways[[1]])) # first omics
+
+  df$combined_pval <- combinePvalues(df)
+  df$combined_padj <- p.adjust(df$combined_pval, method = "BH")
+  
+  df <- cbind(data.frame(pathway = names(pathways[[1]])), df)
+  df
+})
+
+# top 10 pathways based on aggregated p-values 
+lapply(aggregated_pval, function(df) {
+  df[order(df$combined_pval), ][1:max_num_pathways, ] 
+})
+```
+
+
+# Find genes nearest to methylation sites
+```{r, warning=FALSE}
+library(dplyr)
+
+ensembl_genes <- read.csv('ensembl_genes.csv', row.names = 1)
+
+mofa_factor_sub <- read.csv('MOFA/factorweights_EM-seq___cell-type_adjusted___100_000_most_variable_CpG_sites.csv', row.names=1)
+
+
+mofa_factor_per_chromosome <- lapply(seq(1:22), function(x) {
+     sub <- mofa_factor_sub[mofa_factor_sub$chr==x,]
+ })
+
+genes_per_chromosome <- lapply(seq(1:22), function(x) {
+     df_sub <- ensembl_genes[ensembl_genes$chromosome_name==x,]
+ })
+
+
+mofa_factors_with_ensembl <- lapply(seq(1:22), function(x) {
+    genes <- genes_per_chromosome[[x]]
+    mofa_sub <- mofa_factor_per_chromosome[[x]]
+    
+    test <- lapply(mofa_sub$start, function(x) {
+      nearest_row <-which(abs(genes$start_pos - x) == min(abs(genes$start_pos - x)))
+      nearest_gene <- genes[nearest_row, 1]
+      #return(nearest_gene)
+    })
+    mofa_sub$ENSEMBL <- test
+    return(mofa_sub)
+})
+rm(ensembl_genes)
+rm(mofa_factor_sub)
+rm(genes_per_chromosome)
+rm(mofa_factor_per_chromosome)
+
+combined <- bind_rows(mofa_factors_with_ensembl)
+rm(mofa_factors_with_ensembl)
+combined <- combined[1:1000,] # Smaller set to test
+combined$Accession <- unlist(combined$ENSEMBL)
+combined$ENSEMBL <- combined$Accession
+
+input_data$`EM-seq` <- combined
+```
+
+
+
+
+
+
+## Session information
+
+```{r}
+sessionInfo()
+```
+
+
+## References

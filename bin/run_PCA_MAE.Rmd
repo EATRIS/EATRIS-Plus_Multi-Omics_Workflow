@@ -87,6 +87,8 @@ tech_vars_continuous <- lapply(experiments(mae), function(x) {
   t <- t[t!="measurement.id"]
   t <- t[t!="measurement_names"]
   t <- t[t!="ID.Patient"]
+  t <- t[t!="WellPosition"]
+  t <- t[!t %in% c("File.Name", "Creation.Date", "Batch", "Class", "Patient_ID", "batch_qc")]
   t <- t[!t %in% names(colData(mae))]
 })
 tech_vars_continuous
@@ -106,7 +108,6 @@ names(colData(mae))
 colData(mae)$Sex.PhenotypicFeature <- gsub(
   ".NA", "", paste(colData(mae)$Sex, colData(mae)$PhenotypicFeature, sep = "."))
 ```
-
 
 
 
@@ -504,20 +505,47 @@ significant_associations_contin <- lapply(names(pca), function(assay_name) {
 ```{r}
 significant_associations_contin <- do.call(rbind, significant_associations_contin)
 head(significant_associations_contin)
-
-
 ```
 
+
 # Change to readable (shorter) names
+```{r}
+assay_names <- config$experiment_names$PCA
+
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
+
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
+
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
+)
+assay_names_df
+```
+
 
 ```{r}
 get_shorter_assay_names <- function(assay_name) {
   
   if (grepl(pattern = 'Lipidomics, negative', x = assay_name)){
-     short_name <- 'Lipidomics (N)'
+     short_name <- 'Lipidomics Set 1 (N)'
   }
   else if (grepl(pattern = 'Lipidomics, positive', x = assay_name)){
-     short_name <- 'Lipidomics (P)'
+     short_name <- 'Lipidomics Set 1 (P)'
+  }
+  else if (grepl(pattern = 'Lipidomics-SPLINE', x = assay_name)){
+     short_name <- 'Lipidomics Set 2'
   }
   else if (grepl(pattern = 'Very long chain', x = assay_name)){
      short_name <- 'VLCFA'
@@ -527,6 +555,9 @@ get_shorter_assay_names <- function(assay_name) {
   }
   else if (grepl(pattern = 'Amino acids', x = assay_name)){
      short_name <- 'Amino acids'
+  }
+  else if (grepl(pattern = 'IPP', x = assay_name)){
+     short_name <- 'Proteomics-IPP'
   }
   else if (grepl(pattern = 'Proteomics', x = assay_name)){
      short_name <- 'Proteomics'
@@ -675,9 +706,9 @@ ggp <- ggplot(data2plot) +
   ggtitle("Significant associations between top 10\nPrincipal Components and variables")
 
 ggsave(
-  file.path(outdir, "PCA_summary.png"),
+  file.path(outdir, "PCA_summary.pdf"),
   plot = ggp,
-  width = 23, height = 10.46, units = "cm", dpi = 300)
+  width = 23, height = 10.46, units = "cm", dpi = 500)
 
 ggp
 ```
@@ -688,28 +719,28 @@ ggp
 
 
 ```{r, fig.width=10, fig.height=5}
-# ggp <- ggplot(data2plot) +
-#   geom_point(aes(x = factor(.data$tested_variable, levels = c(
-#     "Age", "Age.group", 
-#     "Age_pred_BLUP", "Age_acc_BLUP", 
-#     "Age_pred_Levine", "Age_acc_Levine")),
-#                  y = .data$assay_name,
-#                  size = .data$`Joint variation\nexplained by PCs`,
-#                  col = .data$`Variable type`)) +
-#   theme(
-#     axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1)
-#   ) +
-#   scale_color_okabe_ito() +
-#   ylab("Data set") +
-#   xlab("Biological/technical variable") +
-#   ggtitle("Significant associations between top 10\nPrincipal Components and variables")
-# 
-# ggsave(
-#   file.path(outdir, "PCA_summary_Age.png"),
-#   plot = ggp,
-#   width = 23, height = 10.46, units = "cm", dpi = 300)
-# 
-# ggp
+ggp <- ggplot(data2plot) +
+  geom_point(aes(x = factor(.data$tested_variable, levels = c(
+    "Age", "Age.group",
+    "Age_pred_BLUP", "Age_acc_BLUP",
+    "Age_pred_Levine", "Age_acc_Levine")),
+                 y = .data$assay_name,
+                 size = .data$`Joint variation\nexplained by PCs`,
+                 col = .data$`Variable type`)) +
+  theme(
+    axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1)
+  ) +
+  scale_color_okabe_ito() +
+  ylab("Data set") +
+  xlab("Biological/technical variable") +
+  ggtitle("Significant associations between top 10\nPrincipal Components and variables")
+
+ggsave(
+  file.path(outdir, "PCA_summary_Age.png"),
+  plot = ggp,
+  width = 23, height = 10.46, units = "cm", dpi = 300)
+
+ggp
 ```
 
 ## Session information

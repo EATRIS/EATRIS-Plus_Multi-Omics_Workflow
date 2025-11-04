@@ -1,0 +1,453 @@
+---
+title: 'Multi-block PLS-DA (DIABLO)'
+author:
+- Anna Niehues^[Radboud university medical center, Anna.Niehues@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+bibliography: references.bib
+params:
+  outcome: "Sex"
+  n_comp: 100
+  n_repeat: 0
+  config_file: "config.yml"
+---
+
+Perform N-integration discriminant analysis with DIABLO implemented in mixOmics. 
+
+**NOTE:** set n_repeat to a high enough value for model training and evaluation (50-100)
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$DIABLO
+dir.create(outdir)
+```
+
+
+## Read input data 
+
+Input data is a MultiAssayExperiment (MAE) object. All assays in the MAE will be used for analysis Multi-omics Factor Analysis (MOFA).
+
+```{r}
+library(MultiAssayExperiment)
+library(HDF5Array)
+
+mae <- loadHDF5MultiAssayExperiment(dir = config$mae_hdf5_dir_path, 
+                                    prefix = config$mae_hdf5_prefix)
+```
+
+Select male/female individuals based on input parameters
+
+```{r}
+sample_selection <- c()
+if (config$sample_selection$include_MALE) {
+  sample_selection <- c(sample_selection, "MALE")}
+if (config$sample_selection$include_FEMALE) {
+  sample_selection <- c(sample_selection, "FEMALE")}
+
+mae <- mae[, colData(mae)$Sex %in% sample_selection]
+
+mae
+```
+
+
+
+```{r}
+# merge targeted metabolomics assays
+# tmp_mtblms_se <- list(mae[["Amino acids"]], mae[["Acylcarnitines"]],
+#                   mae[["Very long chain fatty acids"]])
+# tmp_mtblms_se <- lapply(tmp_mtblms_se, function(se) {
+#   rowdata_df <- data.frame(rowData(se))
+#   if (!"HMDB.ID.s." %in% names(rowdata_df)) {rowdata_df$HMDB.ID.s. <- NA}
+#   se <- SummarizedExperiment(assays = assays(se), rowData = rowdata_df)
+# })
+# 
+# mae <- c(mae, `Metabolomics` = do.call(rbind, tmp_mtblms_se))
+```
+
+
+Merge metabolomics, merge lipidomics
+
+```{r}
+# merge se
+# mtblms_se <- list(mae[["Amino acids"]], mae[["Acylcarnitines"]],
+#                   mae[["Very long chain fatty acids"]])
+# mtblms_se <- lapply(mtblms_se, function(se) {
+#   rowdata_df <- data.frame(rowData(se))
+#   if (!"HMDB.ID.s." %in% names(rowdata_df)) {
+#     rowdata_df$HMDB.ID.s. <- NA
+#   }
+#   se <- SummarizedExperiment(assays = assays(se), rowData = rowdata_df)
+# })
+# se_metabolomics <- do.call(rbind, mtblms_se)
+# mae <- c(mae, `Metabolomics` = se_metabolomics)
+# 
+# # merge se
+# lpdms_se <- list(mae[["Lipidomics, positive"]], mae[["Lipidomics, negative"]])
+# lpdms_se <- lapply(lpdms_se, function(se) {
+#   rowdata_df <- data.frame(rowData(se))
+#   if (!"RT.sec." %in% names(rowdata_df)) {
+#     rowdata_df$RT.sec. <- NA
+#   }
+#   se <- SummarizedExperiment(assays = assays(se), rowData = rowdata_df)
+# })
+# se_lipidomics <- do.call(rbind, lpdms_se)
+# mae <- c(mae, `Lipidomics` = se_lipidomics)
+```
+
+
+```{r}
+# experiments(mae)
+assay_names <- config$experiment_names$DIABLO
+names(assay_names) <- assay_names
+assay_names
+```
+
+
+## Prepare data for DIABLO
+
+* X - named list of data sets (blocks) measured on the same samples (matrices, samples x variables, with samples order matching in all blocks
+* Y - vector with classes for observations
+
+```{r}
+sample_names <- Reduce(
+  intersect,
+  lapply(assay_names, function(assay_name) {
+    rownames(colData(mae[[assay_name]]))
+}))
+
+features2include <- lapply(assay_names, function(assay_name) {
+  rownames(assays(mae)[[assay_name]])[
+    apply(as.data.frame(assays(mae)[[assay_name]]), 1, function(row) {
+      var(row) != 0 & sum(row == 0) < 10 })]
+      # var(row[sample_names]) != 0 & sum(row[sample_names] == 0) < 10 })]
+}) 
+lapply(features2include, length)
+
+
+# X <- lapply(assay_names, function(assay_name) {
+#   t(assays(mae)[[assay_name]])[, features2include[[assay_name]]]
+# })
+X <- lapply(assay_names, function(assay_name) {
+  t(assays(mae)[[assay_name]])[sample_names, features2include[[assay_name]]]
+})
+Y <- colData(mae)[sample_names, ][[params$outcome]]
+
+# remove samples with missing outcome 
+X <- lapply(X, function(x) {
+  x <- x[!is.na(Y), ]
+})
+Y <- Y[!is.na(Y)]
+
+if (is.numeric(Y)) {
+  # make categories
+  Y <- cut(Y, breaks = quantile(Y, probs = seq(0,1,1/3)), include.lowest = T)
+}
+
+print(lapply(X, dim))
+print(summary(Y))
+```
+
+
+## Principal Component Analysis (PCA)
+
+Unsupervised data analysis and visualization
+
+```{r}
+library(mixOmics)
+
+n_comp <- min(unlist(lapply(X, ncol)))
+n_comp <- ifelse(params$n_comp > n_comp, 
+                 n_comp, 
+                 params$n_comp)
+
+# run PCA
+pca.X <- lapply(assay_names, function(assay_name) {
+  print(assay_name)
+  df <- as.data.frame(X[[assay_name]])
+  ## Remove non-variabe columns
+  df <- df[, apply(df, 2, function(x) length(unique(x)) > 1)]
+  pca(df, ncomp = n_comp,  center = TRUE, scale = TRUE)
+})
+
+# scree plot - explained variance per principal component
+lapply(assay_names, function(assay_name) {
+  plot(pca.X[[assay_name]], main = paste0("PCA scree plot, ", assay_name))
+  NULL
+})
+
+# score plot of individuals, colored by outcome
+lapply(assay_names, function(assay_name) {
+  plotIndiv(pca.X[[assay_name]], group = Y, ind.names = FALSE, legend = TRUE, ellipse = T,
+            title = paste0("PCA score plot, ", assay_name))
+  NULL
+})
+```
+
+## Pairwise PLS
+
+
+```{r}
+list.keepX <- list.keepY <- lapply(assay_names, function(assay_name) {
+  ifelse(ncol(X[[assay_name]]) > 1000, 1000, ncol(X[[assay_name]]))
+})
+
+combos <- combn(assay_names, 2, simplify = FALSE)
+
+pairwise.pls.cor <- lapply(combos, function(combo) {
+  #print(combo)
+  samples_names <- intersect(rownames(X[[combo[[1]]]]), rownames(X[[combo[[2]]]]))
+  pls.XY <- spls(
+    X[[combo[[1]]]][samples_names,], X[[combo[[2]]]][samples_names,], 
+    keepX = list.keepX[[combo[[1]]]], 
+    keepY = list.keepY[[combo[[2]]]],
+    mode = "canonical")
+  cat("\n")
+  
+  plotVar(
+    pls.XY, #cutoff = 0.4,
+    title = paste0("sPLS, ", combo[[1]], ", ", combo[[2]]),
+    legend = combo, var.names = F, pch = c(16, 17))
+
+  list(
+    combo = combo,
+    cor.combo = cor(pls.XY$variates$X[, "comp1"], pls.XY$variates$Y[, "comp1"])
+  )
+})
+
+cor.combos.sum <- sum(sapply(pairwise.pls.cor, function(x) {x[["cor.combo"]]}))
+
+design <- matrix(0, ncol = length(assay_names), nrow = length(assay_names),
+                 dimnames = list(assay_names, assay_names))
+
+for (x in pairwise.pls.cor) {
+  cor_val <- round(x[["cor.combo"]] / cor.combos.sum / 2, 2)
+  design[x[["combo"]][[1]], x[["combo"]][[2]]] <- cor_val
+  design[x[["combo"]][[2]], x[["combo"]][[1]]] <- cor_val
+}
+
+cat("Design matrix for DIABLO\n")
+design
+```
+
+
+## Get omics names list
+```{r}
+assay_names <- config$experiment_names$DIABLO
+
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
+
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
+
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
+)
+
+print(assay_names_df)
+```
+
+
+```{r, fig.height=8}
+library(ggcorrplot)
+
+pairwise.pls.cor_m <- matrix(
+  NA, ncol = length(assay_names), nrow = length(assay_names),
+  dimnames = list(assay_names, assay_names))
+
+for (x in pairwise.pls.cor) {
+  print(x)
+  cor_val <- x[["cor.combo"]]
+  pairwise.pls.cor_m[x[["combo"]][[1]], x[["combo"]][[2]]] <- cor_val
+  pairwise.pls.cor_m[x[["combo"]][[2]], x[["combo"]][[1]]] <- cor_val
+}
+
+# Shorter omics names
+rownames(pairwise.pls.cor_m) <- assay_names_df$readable
+colnames(pairwise.pls.cor_m) <- assay_names_df$readable
+
+
+dimnames(pairwise.pls.cor_m) <- lapply(
+  dimnames(pairwise.pls.cor_m), function(x) {
+    stringr::str_wrap(x, width = 35) })
+
+pairwise.pls.cor_m[is.na(pairwise.pls.cor_m)] <- 1
+
+
+ggp <- ggcorrplot(
+  data.frame(pairwise.pls.cor_m),
+  lab = T,
+  hc.order = T) +
+  scale_fill_gradient2(
+  limit = c(0.3, 1), 
+  low = "white", high = "blue")
+
+ggsave(file.path(outdir, "pairwise_sPLS_cor.png"), ggp,
+       width = 22, height = 20, units = "cm", dpi = 300)
+ggp
+```
+
+
+## DIABLO
+
+Run DIABLO using all features 
+
+```{r}
+initial.diablo.XY <- block.splsda(X, Y, ncomp = n_comp, design = design)
+
+```
+
+
+
+
+### Model optimization 
+
+Optimize number of components based on cross-validation
+
+```{r}
+# run performance evaluation
+perf.initial.diablo.XY <- perf(
+  initial.diablo.XY, 
+  # repeated 5-fold cross-validation
+  validation = "Mfold", folds = 5, nrepeat = params$n_repeat, 
+  progressBar = FALSE)
+
+# plot performance evaluation 
+plot(perf.initial.diablo.XY)
+
+print(perf.initial.diablo.XY$choice.ncomp)
+
+choice.ncomp <- perf.initial.diablo.XY$choice.ncomp$WeightedVote[
+  "Overall.BER", "centroids.dist"]
+```
+
+Tune number of features (for sparse model)
+
+Run final model
+
+```{r}
+final.diablo.XY <- block.splsda(X, Y, ncomp = choice.ncomp)
+```
+
+
+
+Model visualization
+
+
+```{r}
+if (choice.ncomp > 1) {
+  plotIndiv(final.diablo.XY, ind.names = F, legend = T)
+}
+```
+
+
+Correlation between modalities
+
+```{r}
+plotDiablo(final.diablo.XY)
+```
+
+
+```{r}
+# plotArrow(final.diablo.XY, ind.names = F, legend = T)
+# no spaces allowed in assay name?
+```
+
+
+```{r}
+if (choice.ncomp > 1) {
+  plotVar(final.diablo.XY, var.names = F, legend = T, cutoff = 0.5)
+}
+        # col = ggokabeito::palette_okabe_ito(1:length(X)))
+```
+
+
+```{r, fig.width=14}
+num_features2plot <- 10
+lapply(1:choice.ncomp, function(comp) {
+  plotLoadings(final.diablo.XY, 
+               ndisplay = num_features2plot, 
+               size.title = 1,
+               comp = comp,
+               contrib = "max", method = "median")
+  NULL
+})
+```
+
+
+Relevance network
+
+```{r, fig.width=10}
+# network(final.diablo.XY, cutoff = 0.4)
+```
+
+
+
+
+
+### Performance evaluation
+
+Determine performance of final model
+
+```{r}
+perf.final.diablo.XY <- perf(
+  final.diablo.XY, 
+  validation = "Mfold", folds = 5, nrepeat = params$n_repeat, 
+  dist = "centroids.dist", progressBar = FALSE)
+```
+
+
+```{r}
+perf.final.diablo.XY$MajorityVote.error.rate
+```
+
+```{r}
+perf.final.diablo.XY$WeightedPredict.error.rate
+```
+
+AUC
+
+```{r}
+lapply(assay_names, function(assay_name) {
+  auc.diablo.XY <- auroc(final.diablo.XY, roc.block = assay_name)
+  NULL
+})
+```
+
+```{r}
+final.diablo.XY.loadings <- final.diablo.XY$loadings
+
+lapply(assay_names, function(a) {
+  df <- cbind(final.diablo.XY.loadings[[a]], data.frame(rowData(mae[[a]])))
+  f <- gsub("[| ,]", "_", a)
+  write.csv(df, file = file.path(outdir, paste0("XYloadings_", f, ".csv")))
+})
+```
+
+
+
+
+## R session information
+
+```{r}
+sessionInfo()
+```
+
+## References
+

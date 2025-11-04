@@ -1,0 +1,126 @@
+---
+title: 'Cell type levels, males vs. females'
+author:
+  - Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+params:
+  config_file: "config.yml"
+---
+
+
+## Libraries
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(rstatix)
+library(gridExtra)
+library(grid)
+```
+
+
+## Themes and colors
+```{r}
+source('Z:/omics/EM-seq_UU/analysis/themes_and_colors.R')
+```
+
+
+## Read data and metadata: MultiAssayExperiment
+
+The `MultiAssayExperiment` [@Ramos2017] contains preprocessed data and has been created with the *R* notebook `examples\create_MultiAssayExperiment.Rmd`.
+
+```{r read_multiassayexperiment}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$PCA
+dir.create(outdir)
+```
+
+```{r}
+require(SummarizedExperiment)
+library(MultiAssayExperiment)
+
+
+mae <- loadHDF5MultiAssayExperiment(
+  dir = config$mae_hdf5_dir_path, 
+  prefix = config$mae_hdf5_prefix)
+#mae
+```
+
+
+```{r}
+# extract names of experiments
+experiment_names <- config$experiment_names$PCA
+names(experiment_names) <- experiment_names
+
+# make sure that there are no missing values
+stopifnot(sapply(experiment_names, function(n) {
+  !any(is.na(assays(mae[[n]])[[1]]))
+}))
+```
+
+
+## Load unified violin plot function
+```{r}
+source('../SupportFunctions/ViolinPlot.R')
+```
+
+
+## Violin plots
+```{r, warning=FALSE}
+pheno_df <- as.data.frame(colData(mae))
+
+bio_vars_continuous <- c(
+  "Age",
+  "Height",
+  "Weight",
+  "BMI",
+  "Leukocytes",
+  "Erythrocytes",
+  "Hemoglobin",
+  "Hematocrit",
+  "Platelets",
+  "MCV",
+  "MCH",
+  "MCHC",
+  "Lymphocytes",
+  "MXD",
+  "Neutrophils",
+  "Age_pred_BLUP", 
+  "Age_acc_BLUP",
+  "Age_pred_Levine", 
+  "Age_acc_Levine")
+
+
+boxplots <- lapply(bio_vars_continuous, function(var) {
+  ggp <- plot_violin_unified(
+    data = pheno_df, 
+    y_var = var,
+    x_var = "Sex",
+    palette = "jco"
+        )
+  ggp
+  #ggsave(ggp, filename = paste0('Violin_', var, '.png'))
+  
+})
+``` 
+
+## Arrange figure in PDF
+```{r}
+n <- length(boxplots)
+nrow <- ceiling(n /2)
+pdf("Z:/Results/2025_July_Rebuttal/CelltypeLevels.pdf", width = 1.7 * nrow, height = 3 * nrow)
+#do.call(grid.arrange, c(boxplots, ncol =2))
+ggarrange(plotlist = boxplots, ncol =3, nrow = 10)
+dev.off()
+```
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,391 @@
+---
+title: 'Robust linear models -- preprocessed single omics data'
+author:
+  - Anna Niehues^[Radboud university medical center, Anna.Niehues@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+bibliography: references.bib
+params:
+  config_file: "config.yml"
+  outdir: Output
+---
+
+## Params
+```{r}
+print(params)
+```
+
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$RLM
+```
+
+
+## Read significant results
+```{r}
+mae_rlm_all_merged <- read.csv('Z:/Results/2025_July_Rebuttal/RLM/RLM_signif_hits.csv', row.names = 1)
+```
+
+
+## TODO ADD EMseq data
+```{r}
+EMseq_results_df <- read.csv('Z:/Results/2025_July_Rebuttal/RLM/EMseq_results_signif.csv', row.names = 1)
+EMseq_results_df$X <- NULL
+
+## Add columns that are in the main df 
+EMseq_results_df$assay <- 'EMseq'
+EMseq_results_df$feature2 <- EMseq_results_df$feature
+EMseq_results_df$label <- NA
+EMseq_results_df$significant <- TRUE
+
+## Add method column
+method_values <- lapply(1:nrow(EMseq_results_df), function(x) {
+  dataset <- EMseq_results_df[x, "dataset"]
+  cov <- EMseq_results_df[x, "covariates"]
+  if (cov == 'Sex') {
+    value <- 'all | covariate: Sex'
+  }
+  else if (dataset == 'male') {
+    value <- 'male | no covariate'
+  }
+  else if (dataset == 'female') {
+    value <- 'female | no covariate'
+  }
+  else {
+    value <- 'all | no covariate'
+  }
+  value
+})
+EMseq_results_df$method <- as.character(method_values)
+```
+
+## Merge data frames
+```{r}
+## Same order of columns
+EMseq_results_df <- EMseq_results_df[, c(1,2,3,4,5,6,7,8,9,10,12,13,14,11,15,16)]
+      
+
+if (identical(colnames(EMseq_results_df), colnames(mae_rlm_all_merged))) {
+  mae_rlm_all_merged <- rbind(mae_rlm_all_merged, EMseq_results_df)
+}
+```
+
+
+## Assay names
+```{r}
+assay_names <- unique(mae_rlm_all_merged$assay)
+```
+
+### Visualize results
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+library(ggokabeito) # Okabe-Ito
+```
+
+
+## Outcome variables
+```{r}
+# outcome variables
+outcomes <- c(
+  "Sex", "Age", "Age.group", 
+  "Height", "Weight", "BMI", "BMI.group", 
+  "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group", 
+  "Leukocytes", "Erythrocytes", "Hemoglobin", "Hematocrit", "Platelets", "MCV", 
+  "MCH", "MCHC", "Lymphocytes", "MXD", "Neutrophils",
+  "Age_pred_BLUP", "Age_acc_BLUP",   "Age_pred_Levine", "Age_acc_Levine")
+```
+
+
+```{r read_multiassayexperiment}
+library(MultiAssayExperiment)
+
+mae <- loadHDF5MultiAssayExperiment(
+  dir = config$mae_hdf5_dir_path, 
+  prefix = config$mae_hdf5_prefix)
+```
+
+
+Volcano plots per phenotypic variable
+
+```{r volcano_plots, fig.width = 11, fig.height = 4.5}
+# lapply(outcomes, function(outcome) {
+#   rlm_res <- mae_rlm_all_merged[mae_rlm_all_merged$outcome == outcome, ]
+#   rlm_res$method <- stringr::str_wrap(paste(rlm_res$dataset, " | ", rlm_res$formula), width = 20)
+#   # my_levels <- unique(rlm_res$method)[order(sapply(unique(rlm_res$method), nchar))]
+#   my_levels <- unique(rlm_res$method)[order(unique(rlm_res$method))]
+#   rlm_res$method <- factor(rlm_res$method, levels = my_levels)
+#   rlm_res$assay <- factor(rlm_res$assay, levels = assay_names)
+#   
+#   ggp <- ggplot(rlm_res,
+#          aes(x = coefficient, y = -log10(p.adj))) +
+#     geom_point(aes(col = p.adj<=0.05, shape = p.adj<=0.05), 
+#                na.rm = T, size = 1) +
+#     scale_color_okabe_ito() + scale_fill_okabe_ito() +
+#     facet_grid(assay~method, scales = "free_y") +
+#     theme_bw() +
+#     theme(strip.text.y = element_text(angle = 0),
+#           text = element_text(size = 13),
+#           panel.spacing = unit(0.1, "lines")) +
+#     geom_text_repel(
+#       aes(label = label), size = 2.5, direction = "both",
+#       min.segment.length = unit(0.1, "lines"),
+#       max.time = 3, max.iter = 1000000) +
+#     xlab("Regression coefficient")
+#     # ggtitle(stringr::str_wrap(
+#     #   paste0("Robust linear models, ", outcome), width = 60))
+#   ggsave(file.path(outdir, paste0("RLMvolcano_", outcome, ".png")),
+#          ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+#   
+#   ggp
+# })
+```
+
+Compare number (or proportion) of significant hits per omics, outcome variable, and model.
+
+```{r, fig.width=11, fig.height=6.5}
+require(dplyr)
+require(tidyr)
+
+names(mae_rlm_all_merged)
+mae_rlm_all_merged$significant <- mae_rlm_all_merged$p.adj <= 0.05
+mae_rlm_all_merged$method <- as.factor(paste0(
+  mae_rlm_all_merged$dataset, 
+  ifelse(mae_rlm_all_merged$covariates != "", 
+         paste0(" | covariate: ", mae_rlm_all_merged$covariates), 
+         " | no covariate")))
+
+
+# calculate proportion of significant features per omics, outcome, data set/model
+df <- mae_rlm_all_merged %>%
+  group_by(assay, outcome, method) %>%
+  summarise(n_signif = sum(significant, na.rm = TRUE), .groups = "drop") 
+
+# calculate frequency using original data dimensions
+features_per_assay <- sapply(experiments(mae), nrow)
+n_features_df <- data.frame(
+    assay = names(features_per_assay),
+    total_features = as.numeric(features_per_assay)
+)
+n_features_df <- n_features_df[n_features_df$assay %in% assay_names,]
+# Mannually add total features for Emseq data (100,000)
+n_features_df <- rbind(n_features_df, data.frame(assay ='EMseq', total_features = as.numeric(100000)))
+
+df <- df %>%
+  left_join(n_features_df, by = "assay") %>%
+  mutate(freq = n_signif / total_features)
+```
+
+
+
+## Get omics names list
+```{r}
+config <- yaml::read_yaml(params$config)
+
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
+
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
+
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
+)
+
+print(assay_names_df)
+```
+
+
+## Plot significant features
+```{r}
+shorter_names <- assay_names_df$readable[match(df$assay, assay_names_df$original)] 
+
+df$assay_shorter <- shorter_names
+df$outcome <- factor(df$outcome, levels = outcomes)
+df$`Dataset | model` <- factor(df$method, levels = c(
+  "all | no covariate", "all | covariate: Sex",
+  "female | no covariate", "male | no covariate"
+))
+
+omics_labels <- sapply(assay_names_df$shorter_assay_names, function(x) {
+    long_name <- assay_names_df[assay_names_df$shorter_assay_names == x, 1]
+    label <- paste0(x, '\n', dim(mae[[long_name]])[1], ' features')
+    label
+})
+
+# Remove aging outcomes
+df_non_aging <- df[!(df$outcome %in% c("Age_pred_BLUP", "Age_acc_BLUP",   "Age_pred_Levine", "Age_acc_Levine")), ]
+
+
+ggp <- ggplot(df_non_aging) + 
+  geom_col(aes_string(
+    x = "`Dataset | model`", y = "freq", fill = "`Dataset | model`"),
+    position = "dodge") + #position_dodge2(0.9, preserve = "total")) +
+  facet_grid(rows = vars(assay_shorter), cols = vars(outcome), labeller=labeller(.rows=omics_labels)) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), #element_text(angle = 90, vjust = 0.5, hjust = 1),
+        strip.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0),
+        axis.title.x = element_blank(),
+        panel.spacing = unit(0, "lines"),
+        legend.position = "bottom",
+        text = element_text(size = 13)) +
+  scale_fill_okabe_ito(order = c(1, 3, 7, 5)) +
+  scale_y_continuous(
+    name = stringr::str_wrap(
+      "Proportion of significantly associated omics features",
+      width = 30),
+    breaks = seq(0, 0.5, 0.1),
+    labels = c("", "0.1", "", "", "", "0.5"))
+
+
+dir.create(outdir)
+ggsave(file.path(outdir, "RLMproportion_signif_hits.pdf"), ggp,
+       width = 28.04, height = 20.46, units = "cm", dpi = 300)
+
+ggp
+
+# Save dataframe with significant hits
+write.csv(df, file.path(outdir, "signif_hits.csv"))
+  
+```
+
+### Aging
+```{r}
+df_aging <- df[grep(paste('Age', collapse = "|"),  df$outcome), ]
+
+ggp <- ggplot(df_aging) + 
+  geom_col(aes_string(
+    x = "`Dataset | model`", y = "freq", fill = "`Dataset | model`"),
+    position = "dodge") + #position_dodge2(0.9, preserve = "total")) +
+  facet_grid(rows = vars(assay_shorter), cols = vars(outcome), labeller=labeller(.rows=omics_labels)) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), #element_text(angle = 90, vjust = 0.5, hjust = 1),
+        strip.text.x = element_text(angle = 90),
+        strip.text.y = element_text(angle = 0),
+        axis.title.x = element_blank(),
+        panel.spacing = unit(0, "lines"),
+        legend.position = "bottom",
+        text = element_text(size = 13)) +
+  scale_fill_okabe_ito(order = c(1, 3, 7, 5)) +
+  scale_y_continuous(
+    name = stringr::str_wrap(
+      "Proportion of significantly associated omics features",
+      width = 30),
+    breaks = seq(0, 0.4, 0.01),
+    labels = scales::number_format(accuracy = 0.01)
+    ) 
+
+
+dir.create(outdir)
+ggsave(file.path(outdir, "RLMproportion_signif_hits_Aging.pdf"), ggp,
+       width = 18.04, height = 18.46, units = "cm", dpi = 300)
+
+ggp
+```
+
+
+### Check overlap between lipidomics platforms
+```{r}
+mae_rlm_all_merged_lip_SPLINE <- mae_rlm_all_merged[mae_rlm_all_merged$assay == 'Lipidomics-SPLINE | positive',]
+mae_rlm_all_merged_lip_MS <- mae_rlm_all_merged[mae_rlm_all_merged$assay == 'Lipidomics, positive | transformed',]
+
+mae_rlm_all_merged_lip_MS$FeatureOutcome <- paste0(mae_rlm_all_merged_lip_MS$formula, '_', mae_rlm_all_merged_lip_MS$feature2)
+mae_rlm_all_merged_lip_SPLINE$FeatureOutcome <- paste0(mae_rlm_all_merged_lip_SPLINE$formula, '_', mae_rlm_all_merged_lip_SPLINE$feature2)
+
+intersections <- intersect(mae_rlm_all_merged_lip_MS$FeatureOutcome, mae_rlm_all_merged_lip_SPLINE$FeatureOutcome)
+
+intersecion_df <- data.frame(association = intersections)
+intersecion_df <- intersecion_df %>%
+  separate(association, into = c("phenotype", "feature"), sep = "_", extra = "merge")
+
+write.csv(intersecion_df, 'Z:/Results/2025_July_Rebuttal/Lipidomics_RLM_overlappings_associations.csv')
+
+table(intersecion_df$phenotype)
+table(intersecion_df$feature)
+```
+
+
+### Check overlap between proteomics platforms
+```{r}
+## Proteomics_IPP data
+mae_rlm_all_merged_prot_IPP <- mae_rlm_all_merged[mae_rlm_all_merged$assay == 'Proteomics-IPP',]
+proteomics_feature_metadata <- read.delim('Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_featureAnnotation.txt')
+mae_rlm_all_merged_prot_IPP$feature2 <- proteomics_feature_metadata$UniProt[match(mae_rlm_all_merged_prot_IPP$feature, proteomics_feature_metadata$AptName)]
+## MS proteomics data
+mae_rlm_all_merged_prot_MS <- mae_rlm_all_merged[mae_rlm_all_merged$assay == 'Proteomics | imputed missing values',]
+
+# Make column to compare associations
+mae_rlm_all_merged_prot_IPP$FeatureOutcome <- paste0(mae_rlm_all_merged_prot_IPP$formula, '_', mae_rlm_all_merged_prot_IPP$feature2)
+mae_rlm_all_merged_prot_MS$FeatureOutcome <- paste0(mae_rlm_all_merged_prot_MS$formula, '_', mae_rlm_all_merged_prot_MS$feature2)
+
+intersections <- intersect(mae_rlm_all_merged_prot_IPP$FeatureOutcome, mae_rlm_all_merged_prot_MS$FeatureOutcome)
+
+intersecion_df <- data.frame(association = intersections)
+intersecion_df <- intersecion_df %>%
+  separate(association, into = c("phenotype", "feature"), sep = "_", extra = "merge")
+
+write.csv(intersecion_df, 'Z:/Results/2025_July_Rebuttal/Protmics_RLM_overlappings_associations.csv')
+
+table(intersecion_df$phenotype)
+table(intersecion_df$feature)
+```
+
+
+
+### Findings per outcome
+
+Plot selected features
+
+```{r}
+library(tidyr)
+library(dplyr)
+ 
+mae_rlm_all_merged %>%
+  filter(p.adj<=0.05 & rank<=6) %>%
+  filter(dataset == "all") %>%
+  group_by(feature, outcome, assay) %>%
+  count(name = "n_signif") %>%
+  filter(n_signif > 1 | outcome == "Sex")
+```
+
+
+
+## Signifant featureas after p-adjustement on ALL features with all models
+```{r}
+mae_rlm_all_merged$p.adj_all <- p.adjust(mae_rlm_all_merged$p.adj, method = 'BH')
+
+mae_rlm_all_merged %>%
+  filter(p.adj_all<=0.05 & rank<=6) %>%
+  filter(dataset == "all") %>%
+  group_by(feature, outcome, assay) %>%
+  count(name = "n_signif") %>%
+  filter(n_signif > 1 | outcome == "Sex")
+```
+
+
+## Session information
+
+```{r}
+sessionInfo()
+```
+
+## References
+

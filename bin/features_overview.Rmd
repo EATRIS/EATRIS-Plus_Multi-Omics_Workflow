@@ -32,37 +32,34 @@ library(HDF5Array)
 mae <- loadHDF5MultiAssayExperiment(dir = config$mae_hdf5_dir_path, 
                                      prefix = config$mae_hdf5_prefix)
 
-mae
 ```
+
+
 ## Get omics names list
 ```{r}
 assay_names <- config$experiment_names$CV
 
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
 
-# TODO change to readable (shorter) names
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
 
-shorter_assay_names <- c(
-  'Lipidomics (P)',
-  'Lipidomics (N)',
-  'VLCFA',
-  'Acylcarnitines',
-  'Amino acids',
-  'Proteomics',
-  'mRNA-seq',
-  'miRNA-seq',
-  'miRNA qRT-PCR',
-  'EM-seq (var)',
-  'EM-seq (random)',
-  'Metabolomics'
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
 )
 
-assay_names_temp <- assay_names
-assay_names_temp[[12]] <- 'Metabolomics' 
-
-assay_names_df <- data.frame(assay_names_temp, shorter_assay_names)
-#names(assay_names) <- shorter_assay_names
-
-assay_names_df
+print(assay_names_df)
 ```
 
 
@@ -75,12 +72,7 @@ assay_names_df
 read_omics_from_mae <- function(mae_object, name_assay){
   se <- mae_object[[name_assay]]
   df_wide <- data.frame(t(assay(se)))
-  df_wide <- df_wide[ , colSums(is.na(df_wide))==0]
-  # Log transform lipidomcs data
-  # if (name_assay %in% c("mRNA-seq | batch-adjusted")) {
-  #   #df_wide <- as.data.frame(df_wide, center = F, scale = TRUE)
-  #   df_wide <- data.frame(lapply(df_wide, function(x) {log(x+1)}))
-  # }
+  #df_wide <- df_wide[ , colSums(is.na(df_wide))==0]
   df_wide
   
 }
@@ -104,7 +96,6 @@ combine_mtblmcs_data_sex <- function(list_of_assays, item) {
 
 ## Make list of assays
 ```{r}
-
 assay_list <- lapply(assay_names, function(assay_name) {
   df_wide <- read_omics_from_mae(mae, assay_name)
   }) 
@@ -113,14 +104,11 @@ names(assay_list) <- assay_names
 # Combine targeted metabolomics, append to assay_list
 mtblmcs_combined <- combine_mtblmcs_data(assay_list)
 
-
 assay_list$`Targeted metabolomics` <- mtblmcs_combined
 
 # Add shorter names 
-names(assay_list) <- assay_names_df$shorter_assay_names
-
+names(assay_list) <- c(assay_names_df$readable, 'Metabolomics')
 ```
-
 
 
 ## Get Omics list, sex stratified
@@ -139,7 +127,6 @@ assay_list_sex_stratified <- lapply(assay_names, function(assay_name) {
     
     list(df_male, df_female)
   }) 
-names(assay_list_sex_stratified) <- assay_names
 
 # Combine targeted metabolomics, append to assay_list
 mtblmcs_combined_male <- combine_mtblmcs_data_sex(assay_list_sex_stratified, 1)
@@ -149,13 +136,13 @@ mtblmcs_combined_female <- combine_mtblmcs_data_sex(assay_list_sex_stratified, 2
 assay_list_sex_stratified$`Targeted metabolomics` <- list(mtblmcs_combined_male, mtblmcs_combined_female)
 
 # Add shorter names 
-names(assay_list_sex_stratified) <- assay_names_df$shorter_assay_names
+names(assay_list_sex_stratified) <- c(assay_names_df$readable, 'Metabolomics')
 ```
+
 
 ## Functions to calculate reference values (CV, SD, MEAN, MEDIAN, MIN and MAX)
 
 ```{r, fig.width = 20}
-
 library(ggplot2)
 library(ggrepel)
 library(ggokabeito) # Okabe-Ito
@@ -165,8 +152,8 @@ library(ggokabeito) # Okabe-Ito
 make_CV_df <- function(df_input) {
   
   # Calculate Coefficients of Variance
-  df_input <- df_input + (abs(min(df_input)) + 1)
-  CV_list <- sapply(df_input, function(x) sd(x) / mean(x) * 100)
+  df_input <- df_input + (abs(min(df_input, na.rm = T)) + 1)
+  CV_list <- sapply(df_input, function(x) sd(x, na.rm=T) / mean(x, na.rm=T) * 100)
   #CV_list <- sapply(df_input, function(x) sd(x))
   
   df_out <- data.frame(CV_list)
@@ -179,15 +166,15 @@ make_CV_df <- function(df_input) {
 make_ref_values_df <- function(df_input) {
   
   # Calculate Coefficients of Variance
-  df_input_cv <- df_input + (abs(min(df_input)) + 1)
-  CV_list <- sapply(df_input_cv, function(x) sd(x) / mean(x) * 100)
+  df_input_cv <- df_input + (abs(min(df_input, na.rm =T)) + 1)
+  CV_list <- sapply(df_input_cv, function(x) sd(x, na.rm=T) / mean(x, na.rm=T) * 100)
   
   # Calculate more reference values
-  SD_list <- sapply(df_input, function(x) abs(sd(x)))
-  mean_list <- sapply(df_input, function(x) mean(x))
-  median_list <- sapply(df_input, function(x) median(x))
-  min_list <- sapply(df_input, function(x) min(x))
-  max_list <- sapply(df_input, function(x) max(x))
+  SD_list <- sapply(df_input, function(x) abs(sd(x, na.rm=T)))
+  mean_list <- sapply(df_input, function(x) mean(x, na.rm=T))
+  median_list <- sapply(df_input, function(x) median(x, na.rm=T))
+  min_list <- sapply(df_input, function(x) min(x, na.rm=T))
+  max_list <- sapply(df_input, function(x) max(x, na.rm=T))
 
   
   df_out <- data.frame(CV_list, SD_list,
@@ -278,15 +265,15 @@ lapply(seq(1:nrow(assay_names_df)), function(x) save_reference_values2csv(x))
 
 ## Plot Coefficients of Variances per -omics type
 ```{r, fig.width=20}
-#lapply(seq(1:nrow(assay_names_df)), function(x) make_CV_plot_sex_stratified(x)) ##Plot all
-plot_list <- lapply(seq(1:11), function(x) make_CV_plot_sex_stratified(x)) ## Without metabolomics combined and aCGH
+lapply(seq(1:nrow(assay_names_df)), function(x) make_CV_plot_sex_stratified(x)) ##Plot all
+plot_list <- lapply(1:nrow(assay_names_df), function(x) make_CV_plot_sex_stratified(x)) ## Without aCGH
 ```
 
 ### Histogram for Very Long Chain Fatty Acids
 
 ```{r, fig.width=20}
-input_df_male <- assay_list_sex_stratified$VLCFA[[1]]
-input_df_female <- assay_list_sex_stratified$VLCFA[[2]]
+input_df_male <- assay_list_sex_stratified[["VLCFA"]][[1]]
+input_df_female <- assay_list_sex_stratified[["VLCFA"]][[2]]
   
 # Male
 CVs_df_male <- make_CV_df(input_df_male)
@@ -316,10 +303,10 @@ p
 ```{r}
 library(gridExtra)
 
-plot_list[[3]] <- p
+plot_list[[4]] <- p
 n <- length(plot_list)
 nrow <- ceiling(n /2)
-pdf("arranged_plot.pdf", width = 26, height = 3 * nrow)
+pdf("arranged_CVplot.pdf", width = 26, height = 3 * nrow)
 do.call(grid.arrange, c(plot_list, ncol = 2, padding=unit(20, "cm")))
 dev.off()
 ```

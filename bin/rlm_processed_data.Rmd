@@ -43,35 +43,31 @@ experiments(mae)
 ```
 
 Select assays for analysis
-
 ```{r}
+## Get omics names list
 assay_names <- config$experiment_names$RLM
 
-# Change to readable (shorter) names
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
 
-shorter_assay_names <- c(
-  #'Lipidomics (P)',
-  #'Lipidomics (N)',
-  #'aCGH',
-  'VLCFA',
-  'Acylcarnitines',
-  'Amino acids',
-  #'Proteomics',
-  #'mRNA-seq',
-  'miRNA-seq'
-  #'miRNA qRT-PCR'
-  
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
+
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
 )
-
-assay_names_temp <- assay_names
-
-assay_names_df <- data.frame(assay_names_temp, shorter_assay_names)
-#names(assay_names) <- shorter_assay_names
-
-assay_names_df
-
-#names(assay_names) <- assay_names
 ```
+
 
 Technical variables are available per assay
 
@@ -421,194 +417,90 @@ df <- mae_rlm_all_merged %>%
 ```
 
 
-## Mannually add EM-seq (NOT FOR REPRODUCIBLE PIPELINE)
-```{r}
-## Mannually add EM-seq##
-
-# beta_values <- read.csv('Z:/Results/2023_12_21/RLM/signif_hits_EMseq_Beta.csv')
-
-df2 <- beta_values %>%
-  group_by(assay, outcome, method) %>%
-  count(significant, name = "n_signif") %>%
-  group_by(assay, outcome, method) %>%
-  mutate(freq = n_signif / sum(n_signif)) %>%
-  drop_na()
-
-df2$freq <- lapply(df2$n_signif, function(x) {
-  freq <- x / 100000 #number of methylation sites
-})
-df2 <- df2[df2$assay == 'EM-seq | cell-type adjusted | 100,000 most variable CpG sites',]
-df2$freq <- as.numeric(as.character(df2$freq))
-df <- rbind(df, df2)
-
-# Merge EM-seq with the rest
-df_emseq_names <- data.frame(colnames(assay_names_df),
-                    c('EM-seq | cell-type adjusted | 100,000 most variable CpG sites', 'EM-seq'))
-```
-
-
-## Plot significant features
-```{r}
-shorter_assay_names <- c(
-  #'Lipidomics (N)',
-  #'Lipidomics (P)',
-  #'aCGH',
-  'VLCFA',
-  'Acylcarnitines',
-  'Amino acids'
-  #'Proteomics',
-  #'mRNA-seq',
-  #'miRNA-seq',
-  #'miRNA qRT-PCR'
-  #'EM-seq'
-)
-
-assay_names_temp <- assay_names
-#assay_names_temp[[10]] <- 'EM-seq | cell-type adjusted | 100,000 most variable CpG sites' #TODO: Is this column still needed? Only for manually adding EM-seq maybe
-
-assay_names_df <- data.frame(assay_names_temp, shorter_assay_names)
-
-# Add shorter names
-shorter_names <- lapply(df$assay, function(x) {
-    new_name <- assay_names_df[assay_names_df$assay_names_temp == x, 2]
-    new_name
-}) 
-df$assay <- shorter_names
-
-
-
-#df$assay_short <- factor(df$assay_short, levels = assay_names)
-df$assay <- factor(df$assay, levels = unique(shorter_names))
-df$outcome <- factor(df$outcome, levels = outcomes)
-df$`Dataset | model` <- factor(df$method, levels = c(
-  "all | no covariate", "all | covariate: Sex",
-  "female | no covariate", "male | no covariate"
-))
-
-omics_labels <- sapply(assay_names_df$shorter_assay_names, function(x) {
-    long_name <- assay_names_df[assay_names_df$shorter_assay_names == x, 1]
-    label <- paste0(x, '\n', dim(mae[[long_name]])[1], ' features')
-    label
-})
-
-# Remove aging outcomes
-df_non_aging <- df[!(df$outcome %in% c("Age_pred_BLUP", "Age_acc_BLUP",   "Age_pred_Levine", "Age_acc_Levine")), ]
-
-
-ggp <- ggplot(df_non_aging[df_non_aging$significant == T, ]) + 
-  geom_col(aes_string(
-    x = "`Dataset | model`", y = "freq", fill = "`Dataset | model`"),
-    position = "dodge") + #position_dodge2(0.9, preserve = "total")) +
-  facet_grid(rows = vars(assay), cols = vars(outcome), labeller=labeller(.rows=omics_labels)) +
-  theme_bw() +
-  theme(axis.text.x = element_blank(), #element_text(angle = 90, vjust = 0.5, hjust = 1),
-        strip.text.x = element_text(angle = 90),
-        strip.text.y = element_text(angle = 0),
-        axis.title.x = element_blank(),
-        panel.spacing = unit(0, "lines"),
-        legend.position = "bottom",
-        text = element_text(size = 13)) +
-  scale_fill_okabe_ito(order = c(1, 3, 7, 5)) +
-  scale_y_continuous(
-    name = stringr::str_wrap(
-      "Proportion of significantly associated omics features",
-      width = 30),
-    breaks = seq(0, 0.5, 0.1),
-    labels = c("", "0.1", "", "", "", "0.5"))
-
-
-dir.create(outdir)
-ggsave(file.path(outdir, "RLMproportion_signif_hits.png"), ggp,
-       width = 28.04, height = 20.46, units = "cm", dpi = 300)
-
-ggp
-
-# Save dataframe with significant hits
-write.csv(df, file.path(outdir, "signif_hits.csv"))
-  
-```
-
-### Aging
-```{r}
-df_aging <- df[grep(paste('Age', collapse = "|"),  df$outcome), ]
-
-ggp <- ggplot(df_aging[df_aging$significant == T, ]) + 
-  geom_col(aes_string(
-    x = "`Dataset | model`", y = "freq", fill = "`Dataset | model`"),
-    position = "dodge") + #position_dodge2(0.9, preserve = "total")) +
-  facet_grid(rows = vars(assay), cols = vars(outcome), labeller=labeller(.rows=omics_labels)) +
-  theme_bw() +
-  theme(axis.text.x = element_blank(), #element_text(angle = 90, vjust = 0.5, hjust = 1),
-        strip.text.x = element_text(angle = 90),
-        strip.text.y = element_text(angle = 0),
-        axis.title.x = element_blank(),
-        panel.spacing = unit(0, "lines"),
-        legend.position = "bottom",
-        legend.title=element_text(size=8),
-        legend.text=element_text(size=8),
-        text = element_text(size = 13)) +
-  scale_fill_okabe_ito(order = c(1, 3, 7, 5)) +
-  scale_y_continuous(
-    name = stringr::str_wrap(
-      "Proportion of significantly associated omics features",
-      width = 30),
-    breaks = seq(0, 0.5, 0.1),
-    labels = c("", "0.1", "", "0.3", "", "")) #+ 
-  ylim(c(0,0.2))
-
-dir.create(outdir)
-ggsave(file.path(outdir, "RLMproportion_signif_hits_Aging.png"), ggp,
-       width = 18.04, height = 18.46, units = "cm", dpi = 300)
-
-ggp
-
-# Save dataframe with significant hits
-write.csv(df_aging, file.path(outdir, "signif_hits_aging.csv"))
-```
-
-
-### Findings per outcome
-
-Plot selected features
-
-```{r}
-library(tidyr)
-library(dplyr)
- 
-mae_rlm_all_merged %>%
-  filter(p.adj<=0.05 & rank<=6) %>%
-  filter(dataset == "all") %>%
-  group_by(feature, outcome, assay) %>%
-  count(name = "n_signif") %>%
-  filter(n_signif > 1 | outcome == "Sex")
-```
-
-
-
-## Signifant featureas after p-adjustement on ALL features with all models
-```{r}
-mae_rlm_all_merged$p.adj_all <- p.adjust(mae_rlm_all_merged$p.adj, method = 'BH')
-
-mae_rlm_all_merged %>%
-  filter(p.adj_all<=0.05 & rank<=6) %>%
-  filter(dataset == "all") %>%
-  group_by(feature, outcome, assay) %>%
-  count(name = "n_signif") %>%
-  filter(n_signif > 1 | outcome == "Sex")
-```
-
-
-## Save Dataframe with significant hits
+## Save Significant associations to CSV (THIS WILL BE THE END OF THIS SCRIPT, or after change the assay names?)
 ```{r}
 signif_hits <- mae_rlm_all_merged[mae_rlm_all_merged$p.adj < 0.05,]
-signif_hits_adjusted_all <- mae_rlm_all_merged[mae_rlm_all_merged$p.adj_all < 0.05,]
-
-
 # Save dataframe with significant hits
 write.csv(signif_hits, file.path(outdir, "signif_hits.csv"))
-write.csv(signif_hits_adjusted_all, file.path(outdir, "signif_hits_adj_all.csv"))
+``` 
+
+
+## RMSE of examples for manuscript
+```{r}
+run_rlm_df <- function(feature, df, outcome, covariates = NULL) {
+    # run rlm for one feature and one outcome
+    df$y <- df[[feature]]
+    # define formula
+    covar_term <- ""
+    if (!is.null(covariates)) {
+      covar_term <- paste0(" + ", paste0(covariates, collapse = " + "))}
+    str_formula <- paste0("y ~ ", outcome, covar_term)
+    my_formula <- as.formula(str_formula)
+    # fit robust regression model
+    rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+    if (length(rlm_fit) < 2) {
+      message("MASS::rlm error: ", feature, ", ", str_formula)
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = NA, 
+        std.error = NA,
+        t.value = NA,
+        p.value = NA)
+    } else {
+      # robust F-test - Wald test for multiple coefficients of rlm object
+      f_test <- f.robftest(rlm_fit, var = 2) # 1=intercept, 3:=covariates
+      # results
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = summary(rlm_fit)$coefficients[2, "Value"], 
+        std.error = summary(rlm_fit)$coefficients[2, "Std. Error"],
+        t.value = summary(rlm_fit)$coefficients[2, "t value"],
+        p.value = f_test$p.value)
+    }
+}
+```
+
+
+## Tigclycarnitine
+```{r}
+se <- mae[["Acylcarnitines | batch-adjusted | with missing values"]]
+df = as.data.frame(t(assays(se)[[1]]))
+df <- cbind(df, colData(mae)[rownames(df), ]) 
+outcome = 'ABO.Blood.Group'
+covariates =  NULL
+feature <- "Tiglylcarnitine"
+
+df$y <- df[,feature]
+str_formula <- paste0("y ~ ", outcome, NULL)
+my_formula <- as.formula(str_formula)
+model <- rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+residuals <- resid(model)
+sqrt(mean(residuals^2))
 
 ```
+
+```{r}
+se <- mae[["Amino acids | batch-adjusted | with missing values"]]
+df = as.data.frame(t(assays(se)[[1]]))
+df <- cbind(df, colData(mae)[rownames(df), ]) 
+outcome = 'Sex'
+covariates =  NULL
+feature <- "O-Phosphoethanolamine"
+
+df$y <- df[,feature]
+str_formula <- paste0("y ~ ", outcome, NULL)
+my_formula <- as.formula(str_formula)
+model <- rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+residuals <- resid(model)
+sqrt(mean(residuals^2))
+```
+
 
 ## Session information
 
