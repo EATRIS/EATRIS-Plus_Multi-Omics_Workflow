@@ -20,8 +20,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 }
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$RLM
-dir.create(outdir)
 ```
 
 ## Read data and metadata: MultiAssayExperiment
@@ -383,7 +381,7 @@ lapply(outcomes, function(outcome) {
     xlab("Regression coefficient")
     # ggtitle(stringr::str_wrap(
     #   paste0("Robust linear models, ", outcome), width = 60))
-  ggsave(file.path(outdir, paste0("RLMvolcano_", outcome, ".png")),
+  ggsave(file.path(paste0("RLMvolcano_", outcome, ".png")),
          ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
   
   ggp
@@ -422,7 +420,7 @@ df <- mae_rlm_all_merged %>%
 ```{r}
 signif_hits <- mae_rlm_all_merged[mae_rlm_all_merged$p.adj < 0.05,]
 # Save dataframe with significant hits
-write.csv(signif_hits, file.path(outdir, "signif_hits.csv"))
+write.csv(signif_hits, "signif_hits.csv")
 ``` 
 
 

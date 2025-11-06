@@ -26,8 +26,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 }
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$DIABLO
-dir.create(outdir)
 ```
 
 
@@ -222,7 +220,7 @@ ggp <- ggcorrplot(
   limit = c(0.3, 1), 
   low = "white", high = "blue")
 
-ggsave(file.path(outdir, "pairwise_sPLS_cor.png"), ggp,
+ggsave(file.path("pairwise_sPLS_cor.png"), ggp,
        width = 22, height = 20, units = "cm", dpi = 300)
 ggp
 ```

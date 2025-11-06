@@ -23,8 +23,7 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 # read paramters and config
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$PEA
-dir.create(outdir)
+
 
 # read input data
 input_data <- lapply(config$PEA_input[[params$input]], function(f) {

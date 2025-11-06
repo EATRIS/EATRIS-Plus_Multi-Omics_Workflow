@@ -20,8 +20,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 }
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$FEATURES
-#dir.create(outdir)
 ```
 
 ## Read input data 
@@ -221,10 +219,7 @@ save_reference_values2csv <- function(item) {
                              'MIN_Female', 'MAX_Female')
 
    # Save to CSV
-  outdir <- config$output_directory$CV
   filename <- paste0(name, "_CVs.csv")
-  out_path <- file.path(outdir, filename)
-  dir.create(out_path)
   write.csv(df_combined, filename, row.names = F)
 }
 

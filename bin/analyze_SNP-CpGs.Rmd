@@ -3,7 +3,6 @@ title: "SNP-CpG_Prot-IPP"
 output: html_document
 params:
   mae_hdf5_path: Z:/omics/MultiAssayExperiments/h5MAE/
-  outdir: "Z:/Results/2025_July_Rebuttal/"
   rna_lm_results: 'Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/SNPcounts_RNApavalue_all.csv'
 ---
 
@@ -13,7 +12,6 @@ The `MultiAssayExperiment` [@Ramos2017] contains preprocessed data and has been 
 
 ```{r read_multiassayexperiment}
 print(params)
-outdir <- params$outdir
 ```
 
 
@@ -204,7 +202,7 @@ plot_sign_results <- function(lm_results, row_n, outdir2) {
     ggtitle(paste0(gene, "\nAdjusted p = ", padj)) +
     theme_bw()
     
-  ggsave(file.path(outdir, outdir2, paste0(gene, "_", ipp.id, ".pdf")), p, width = 6, height = 4)
+  ggsave(file.path(outdir2, paste0(gene, "_", ipp.id, ".pdf")), p, width = 6, height = 4)
   return(p)
   
 }
@@ -259,7 +257,7 @@ for (i in nrow(rna_snp_counts_sign_with_prot)) {
     ggtitle(paste0(gene_sym, "\nAdjusted p = ", padj)) +
     theme_bw()
   
-  ggsave(file.path(outdir, 'SNP_CPG_RNA', paste(gene, "_", i, ".pdf")), p, width = 6, height = 4)
+  ggsave(file.path('SNP_CPG_RNA', paste(gene, "_", i, ".pdf")), p, width = 6, height = 4)
   print(p)
   
 }

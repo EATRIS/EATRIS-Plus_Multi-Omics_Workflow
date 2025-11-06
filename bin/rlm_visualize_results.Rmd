@@ -23,7 +23,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
   warning("This R notebook was implemented using R version 4.2.1")
 }
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$RLM
 ```
 
 
@@ -113,40 +112,7 @@ mae <- loadHDF5MultiAssayExperiment(
 ```
 
 
-Volcano plots per phenotypic variable
 
-```{r volcano_plots, fig.width = 11, fig.height = 4.5}
-# lapply(outcomes, function(outcome) {
-#   rlm_res <- mae_rlm_all_merged[mae_rlm_all_merged$outcome == outcome, ]
-#   rlm_res$method <- stringr::str_wrap(paste(rlm_res$dataset, " | ", rlm_res$formula), width = 20)
-#   # my_levels <- unique(rlm_res$method)[order(sapply(unique(rlm_res$method), nchar))]
-#   my_levels <- unique(rlm_res$method)[order(unique(rlm_res$method))]
-#   rlm_res$method <- factor(rlm_res$method, levels = my_levels)
-#   rlm_res$assay <- factor(rlm_res$assay, levels = assay_names)
-#   
-#   ggp <- ggplot(rlm_res,
-#          aes(x = coefficient, y = -log10(p.adj))) +
-#     geom_point(aes(col = p.adj<=0.05, shape = p.adj<=0.05), 
-#                na.rm = T, size = 1) +
-#     scale_color_okabe_ito() + scale_fill_okabe_ito() +
-#     facet_grid(assay~method, scales = "free_y") +
-#     theme_bw() +
-#     theme(strip.text.y = element_text(angle = 0),
-#           text = element_text(size = 13),
-#           panel.spacing = unit(0.1, "lines")) +
-#     geom_text_repel(
-#       aes(label = label), size = 2.5, direction = "both",
-#       min.segment.length = unit(0.1, "lines"),
-#       max.time = 3, max.iter = 1000000) +
-#     xlab("Regression coefficient")
-#     # ggtitle(stringr::str_wrap(
-#     #   paste0("Robust linear models, ", outcome), width = 60))
-#   ggsave(file.path(outdir, paste0("RLMvolcano_", outcome, ".png")),
-#          ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-#   
-#   ggp
-# })
-```
 
 Compare number (or proportion) of significant hits per omics, outcome variable, and model.
 
@@ -256,15 +222,13 @@ ggp <- ggplot(df_non_aging) +
     labels = c("", "0.1", "", "", "", "0.5"))
 
 
-dir.create(outdir)
-ggsave(file.path(outdir, "RLMproportion_signif_hits.pdf"), ggp,
+ggsave(file.path("RLMproportion_signif_hits.pdf"), ggp,
        width = 28.04, height = 20.46, units = "cm", dpi = 300)
 
 ggp
 
 # Save dataframe with significant hits
-write.csv(df, file.path(outdir, "signif_hits.csv"))
-  
+write.csv(df, "signif_hits.csv")
 ```
 
 ### Aging
@@ -294,8 +258,7 @@ ggp <- ggplot(df_aging) +
     ) 
 
 
-dir.create(outdir)
-ggsave(file.path(outdir, "RLMproportion_signif_hits_Aging.pdf"), ggp,
+ggsave(file.path("RLMproportion_signif_hits_Aging.pdf"), ggp,
        width = 18.04, height = 18.46, units = "cm", dpi = 300)
 
 ggp

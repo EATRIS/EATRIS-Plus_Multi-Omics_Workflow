@@ -28,8 +28,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 }
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$PCA
-dir.create(outdir)
 ```
 
 
@@ -350,7 +348,7 @@ for (assay_name in names(pca)) {
         facet_wrap(vars(variable), nrow = 1, scales = "free") 
       filename <- shorten_name(
         paste0("PCAscoreboxplot_", assay_name, "_", color_var, ".png"))
-      ggsave(file.path(outdir, filename), ggp,
+      ggsave(file.path(filename), ggp,
              width = 28.04, height = 10.46, units = "cm", dpi = 300)
       box_plots[[i]] <- local(ggp)
       i <- i + 1
@@ -454,8 +452,7 @@ significant_associations_contin <- lapply(names(pca), function(assay_name) {
   # correlation plot with FDR-adjusted p-values 
   cor_lim <- max(abs(c(min(score_pheno_cor), max(score_pheno_cor))))
   
-  png(file.path(outdir, 
-                paste0("PCA_cor_", shorten_name(assay_name), ".png")),
+  png(file.path(paste0("PCA_cor_", shorten_name(assay_name), ".png")),
     width = 28.04, height = 10.46, units = "cm", res = 300)
   corrplot(
     score_pheno_cor, 
@@ -707,7 +704,7 @@ ggp <- ggplot(data2plot) +
   ggtitle("Significant associations between top 10\nPrincipal Components and variables")
 
 ggsave(
-  file.path(outdir, "PCA_summary.pdf"),
+  file.path("PCA_summary.pdf"),
   plot = ggp,
   width = 23, height = 10.46, units = "cm", dpi = 500)
 
@@ -737,7 +734,7 @@ ggp <- ggplot(data2plot) +
   ggtitle("Significant associations between top 10\nPrincipal Components and variables")
 
 ggsave(
-  file.path(outdir, "PCA_summary_Age.png"),
+  file.path("PCA_summary_Age.png"),
   plot = ggp,
   width = 23, height = 10.46, units = "cm", dpi = 300)
 

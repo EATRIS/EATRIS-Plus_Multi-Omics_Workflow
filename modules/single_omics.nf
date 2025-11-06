@@ -22,7 +22,7 @@ process RUN_CV {
 
     """
     cp -L $project_dir/bin/features_overview.Rmd features_overview.Rmd 
-    Rscript -e  "rmarkdown::render('features_overview.Rmd ', output_format = 'html_document', output_file = 'cv_plots.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}', references = '${references}'  ))"
+    Rscript -e  "rmarkdown::render('features_overview.Rmd', output_format = 'html_document', output_file = 'cv_plots.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}', references = '${references}'  ))"
     """
     
 }

@@ -64,7 +64,7 @@ stopifnot(sapply(experiment_names, function(n) {
 
 ## Load unified violin plot function
 ```{r}
-source('../SupportFunctions/ViolinPlot.R')
+source('ViolinPlot.R')
 ```
 
 

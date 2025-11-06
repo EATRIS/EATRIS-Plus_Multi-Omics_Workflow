@@ -33,8 +33,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 # read paramters and config
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$PEA
-dir.create(outdir)
 
 # read input data
 input_data <- lapply(config$PEA_input[[params$input]], function(f) {
@@ -511,8 +509,7 @@ lapply(components, function(comp) {
           ggtitle(title)
       
       
-      ggsave(file.path(outdir,
-                       paste0("PEA_", comp, "_", gsub("[ |,]", "_", name), ".png")),
+      ggsave(file.path(paste0("PEA_", comp, "_", gsub("[ |,]", "_", name), ".png")),
              ggp, width = 15, height = 10.46, unit = "cm", dpi = 300)
       ggp
       

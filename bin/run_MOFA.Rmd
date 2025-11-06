@@ -24,8 +24,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 }
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$MOFA
-dir.create(outdir)
 ```
 
 
@@ -256,7 +254,7 @@ features per view)
 require(ggplot2)
 ggp <- plot_data_overview(MOFAobject)
 
-ggsave(file.path(outdir, "MOFA_modality_overview.png"), 
+ggsave(file.path("MOFA_modality_overview.png"), 
        ggp, width = 15, height = 10.46, units = "cm", dpi = 300)
 
 ggp
@@ -332,15 +330,8 @@ reticulate::use_condaenv(condaenv = "mofapy")
 Train the MOFA model
 
 ```{r run_mofa, message=FALSE}
-# outfile = file.path(outdir, 'model.hdf5')
-#MOFAobject.trained <- run_mofa(MOFAobject, outfile)
-```
-
-
-## Read/Write MOFA result
-```{r}
-model_file <- "Z:/Results/2025_July_Rebuttal/MOFA/model.hdf5"
-MOFAobject.trained <- MOFA2::load_model(model_file)
+outfile = file.path('model.hdf5')
+MOFAobject.trained <- run_mofa(MOFAobject, outfile)
 ```
 
 
@@ -377,7 +368,7 @@ ggp <- plot_variance_explained(MOFAobject.trained) +
   )
       
 
-ggsave(file.path(outdir, "MOFA_explained_variance.pdf"), 
+ggsave(file.path("MOFA_explained_variance.pdf"), 
        ggp, width = 14, height = 10.46, units = "cm", dpi = 300)
 
 ggp
@@ -498,8 +489,7 @@ ggp <- ggp + scale_fill_gradient2(
   low = "blue", high = "red", mid = "white", midpoint = 0
 )
 
-ggsave(file.path(outdir, 
-                 "MOFA_factors_vs_continuous.png"), 
+ggsave(file.path("MOFA_factors_vs_continuous.png"), 
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
@@ -553,8 +543,7 @@ ggp <- ggp + scale_fill_gradient2(
   low = "blue", high = "red", mid = "white", midpoint = 0
 )
 
-ggsave(file.path(outdir, 
-                 "MOFA_factors_vs_continuous_aCGH.png"), 
+ggsave(file.path("MOFA_factors_vs_continuous_aCGH.png"), 
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
@@ -604,8 +593,7 @@ ggp <- ggp + scale_fill_gradient2(
   low = "blue", high = "red", mid = "white", midpoint = 0
 )
 
-ggsave(file.path(outdir,
-                 "MOFA_factors_vs_Age.png"),
+ggsave(file.path("MOFA_factors_vs_Age.png"),
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
@@ -756,7 +744,7 @@ if (config$sample_selection$include_MALE &
   
   ggp <- plot(plot_factor_category(MOFAobject.trained, "Sex"))
   
-  ggsave(file.path(outdir, "MOFA_factors_vs_Sex.png"), 
+  ggsave(file.path("MOFA_factors_vs_Sex.png"), 
          ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
   
   ggp
@@ -790,8 +778,7 @@ if (config$sample_selection$include_MALE) {
 ```{r, fig.width=15, fig.height=5}
 ggp <- plot_factor_category(MOFAobject.trained, "Smoking.Status", 
                             excluded_categories = c("Unknown If Ever Smoked"))
-ggsave(file.path(outdir, 
-                 "MOFA_factors_vs_Smoking.Status.png"), 
+ggsave(file.path("MOFA_factors_vs_Smoking.Status.png"), 
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
@@ -802,8 +789,7 @@ ggp
 
 ```{r, fig.width=15, fig.height=5}
 ggp <- plot_factor_category(MOFAobject.trained, "BMI.group")
-ggsave(file.path(outdir, 
-                 "MOFA_factors_vs_BMI.png"), 
+ggsave(file.path("MOFA_factors_vs_BMI.png"), 
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
@@ -826,16 +812,14 @@ dev.off()
 
 ```{r, fig.width=15, fig.height=5}
 ggp <- plot_factor_category(MOFAobject.trained, "ABO.Blood.Group")
-ggsave(file.path(outdir, 
-                 "MOFA_factors_vs_ABO.Blood.Group.png"), 
+ggsave(file.path("MOFA_factors_vs_ABO.Blood.Group.png"), 
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
 
 ```{r, fig.width=15, fig.height=5}
 ggp <- plot_factor_category(MOFAobject.trained, "Rh.Blood.Group", first_factor = 1, last_factor = 12)
-ggsave(file.path(outdir, 
-                 "MOFA_factors_vs_Rh.Blood.Group.png"), 
+ggsave(file.path("MOFA_factors_vs_Rh.Blood.Group.png"), 
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
@@ -844,8 +828,7 @@ ggp
  
 ```{r, fig.width=15, fig.height=5}
 ggp <- plot_factor_category(MOFAobject.trained, "Genomic_Abberation")
-ggsave(file.path(outdir, 
-                 "MOFA_factors_vs_Gene_Abberation.png"), 
+ggsave(file.path("MOFA_factors_vs_Gene_Abberation.png"), 
        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
 ggp
 ```
@@ -869,7 +852,7 @@ lapply(assay_names, function(a) {
   df <- cbind(MOFA_weights[[a]], data.frame(rowData(mae[[a]])))
   
   f <- gsub("[| ,]", "_", a)
-  write.csv(df, file = file.path(outdir, paste0("factorweights_", f, ".csv")))
+  write.csv(df, file = file.path(paste0("factorweights_", f, ".csv")))
 })
 ```
 
