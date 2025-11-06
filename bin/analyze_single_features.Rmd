@@ -7,9 +7,11 @@ output:
     toc: true
     df_print: paged
 params:
-  config_file: "config.yml"
-  rlm_sign_hits: "Z:/Results/2025_July_Rebuttal/RLM/RLM_signif_hits.csv"
-  color_theme: "Z:/omics/EM-seq_UU/analysis/themes_and_colors.R"
+  config_file: NULL
+  references: NULL
+  mae_hdf5_dir_path: NULL
+  rlm_sign_hits: NULL
+  color_theme: NULL
 ---
 
 ## Libraries

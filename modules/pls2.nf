@@ -13,7 +13,7 @@ process RUN_PLS2 {
     label 'full_resources'
 
     input:
-    path mae_path
+    path mae_path, stageAs: 'mae_hdf5'
     path config_file
     path references
     
@@ -22,7 +22,7 @@ process RUN_PLS2 {
 
     """
     cp -L $project_dir/bin/run_mixOmics_PLS2.Rmd run_mixOmics_PLS2.Rmd
-    Rscript -e  "rmarkdown::render('run_mixOmics_PLS2.Rmd', output_format = 'html_document', output_file = 'pls2.html', params = list(mae_hdf5_dir_path = '${mae_path}', config_file = '${config_file}', references = '${references}'  ))"
+    Rscript -e  "rmarkdown::render('run_mixOmics_PLS2.Rmd', output_format = 'html_document', output_file = 'pls2.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}', references = '${references}'  ))"
     """
     
 }

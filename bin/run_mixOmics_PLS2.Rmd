@@ -11,7 +11,9 @@ params:
   outcome: "Sex"
   n_comp: 100
   n_repeat: 0
-  config_file: "config.yml"
+  config_file: NULL
+  references: NULL
+  mae_hdf5_dir_path: NULL
 ---
 
 Perform N-integration discriminant analysis with DIABLO implemented in mixOmics. 

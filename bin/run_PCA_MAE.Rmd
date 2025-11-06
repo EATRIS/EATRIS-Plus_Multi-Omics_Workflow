@@ -7,9 +7,10 @@ output:
   html_document:
     toc: true
     df_print: paged
-#bibliography: references.bib
 params:
-  config_file: "config.yml"
+  config_file: NULL
+  references: NULL
+  mae_hdf5_dir_path: NULL
 ---
 
 This R notebook performs Principal Component Analysis (PCA) using `prcomp` [@R2022] on each individual omics data set provided in a `MultiAssayExperiment` [@Ramos2017].

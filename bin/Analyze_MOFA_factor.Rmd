@@ -3,7 +3,9 @@ title: "Analyze_MOFA_factor"
 output: html_document
 date: '2025-07-11'
 params:
-  config_file: "config.yml"
+  config_file: NULL
+  references: NULL
+  mae_hdf5_dir_path: NULL
   input: "MOFA"
   max_num_pathways: 10
 ---

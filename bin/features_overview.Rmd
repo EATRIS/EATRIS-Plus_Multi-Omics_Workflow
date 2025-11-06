@@ -8,7 +8,9 @@ output:
     df_print: paged
 #bibliography: references.bib
 params:
-  config_file: "config.yml"
+  config_file: NULL
+  references: NULL
+  mae_hdf5_dir_path: NULL
 ---
 
 
