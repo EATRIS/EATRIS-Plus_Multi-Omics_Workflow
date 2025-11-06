@@ -21,6 +21,11 @@ Perform N-integration discriminant analysis with DIABLO implemented in mixOmics.
 **NOTE:** set n_repeat to a high enough value for model training and evaluation (50-100)
 
 ```{r}
+library(mixOmics)
+```
+
+
+```{r}
 if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
   warning("This R notebook was implemented using R version 4.2.1")
 }
