@@ -69,7 +69,7 @@ experiment_names:
   - "Proteomics | with missing values"
   - "Proteomics-IPP"
   - "mRNA-seq-2 | batch-adjusted | corrected"
-  - "miRNA-seq, mature | batch-adjusted"
+  - "miRNA-seq, mature | batch-adjusted | cell-type adjusted"
   - "miRNA qRT-PCR"
   - "EM-seq | cell-type adjusted | 100,000 most variable CpG sites"
   - "EM-seq | cell-type adjusted | 100,000 random CpG sites"
