@@ -39,8 +39,6 @@ if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
 }
 print(params)
 config <- yaml::read_yaml(params$config)
-outdir <- config$output_directory$FEATURES
-#dir.create(outdir)
 ```
 
 
