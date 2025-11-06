@@ -39,7 +39,7 @@ Input data is a MultiAssayExperiment (MAE) object. All assays in the MAE will be
 library(MultiAssayExperiment)
 library(HDF5Array)
 
-mae <- loadHDF5MultiAssayExperiment(dir = config$mae_hdf5_dir_path, 
+mae <- loadHDF5MultiAssayExperiment(dir = params$mae_hdf5_dir_path, 
                                     prefix = config$mae_hdf5_prefix)
 ```
 

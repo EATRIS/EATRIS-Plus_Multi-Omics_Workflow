@@ -40,7 +40,7 @@ library(MultiAssayExperiment)
 
 
 mae <- loadHDF5MultiAssayExperiment(
-  dir = config$mae_hdf5_dir_path, 
+  dir = params$mae_hdf5_dir_path, 
   prefix = config$mae_hdf5_prefix)
 mae
 ```
