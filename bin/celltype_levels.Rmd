@@ -23,11 +23,6 @@ library(grid)
 ```
 
 
-## Themes and colors
-```{r}
-#source('Z:/omics/EM-seq_UU/analysis/themes_and_colors.R')
-```
-
 
 ## Read data and metadata: MultiAssayExperiment
 
@@ -49,7 +44,7 @@ library(MultiAssayExperiment)
 
 
 mae <- loadHDF5MultiAssayExperiment(
-  dir = config$mae_hdf5_dir_path, 
+  dir = params$mae_hdf5_dir_path, 
   prefix = config$mae_hdf5_prefix)
 #mae
 ```
@@ -92,11 +87,8 @@ bio_vars_continuous <- c(
   "MCHC",
   "Lymphocytes",
   "MXD",
-  "Neutrophils",
-  "Age_pred_BLUP", 
-  "Age_acc_BLUP",
-  "Age_pred_Levine", 
-  "Age_acc_Levine")
+  "Neutrophils"
+)
 
 
 boxplots <- lapply(bio_vars_continuous, function(var) {
@@ -107,8 +99,6 @@ boxplots <- lapply(bio_vars_continuous, function(var) {
     palette = "jco"
         )
   ggp
-  #ggsave(ggp, filename = paste0('Violin_', var, '.png'))
-  
 })
 ``` 
 
@@ -117,7 +107,6 @@ boxplots <- lapply(bio_vars_continuous, function(var) {
 n <- length(boxplots)
 nrow <- ceiling(n /2)
 pdf("CelltypeLevels.pdf", width = 1.7 * nrow, height = 3 * nrow)
-#do.call(grid.arrange, c(boxplots, ncol =2))
 ggarrange(plotlist = boxplots, ncol =3, nrow = 10)
 dev.off()
 ```

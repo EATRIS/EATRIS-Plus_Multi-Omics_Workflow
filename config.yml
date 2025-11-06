@@ -1,4 +1,3 @@
-mae_hdf5_dir_path: "h5MAE"
 mae_hdf5_prefix: "mae"
 readable_names:
  "Lipidomics, positive | transformed": "Lipidomics Set 1 (P)"
