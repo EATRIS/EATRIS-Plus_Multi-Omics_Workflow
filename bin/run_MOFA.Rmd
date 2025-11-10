@@ -332,7 +332,7 @@ pip install --no-index --find-links Z:/software/pip Z:/software/pip/mofapy2-0.6.
 The conda environment with Python can now be used by `reticulate` in R.
 
 ```{r define_python_version}
-reticulate::use_condaenv(condaenv = "mofapy")
+reticulate::use_python("/usr/bin/python3", required = T)
 ```
 
 Train the MOFA model
