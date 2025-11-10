@@ -82,10 +82,10 @@ print(assay_names_df)
 
 
 ```{r}
-protein_mappings <- as.data.frame(mae[['Proteomics | imputed missing values']])
-protein_ipp_mappings <- as.data.frame(mae[['Proteomics-IPP']])
-mrna_mappings <- as.data.frame(mae[['mRNA-seq-2 | batch_adjusted | corrected']])
-lipid_mappings <- as.data.frame(mae[['Lipidomics, positive | transformed']])
+protein_mappings <- as.data.frame(rowData(mae[['Proteomics | imputed missing values']]))
+protein_ipp_mappings <- as.data.frame(rowData(mae[['Proteomics-IPP']]))
+mrna_mappings <- as.data.frame(rowData(mae[['mRNA-seq-2 | batch_adjusted | corrected']]))
+lipid_mappings <- as.data.frame(rowData(mae[['Lipidomics, positive | transformed']]))
 ```
 
 
