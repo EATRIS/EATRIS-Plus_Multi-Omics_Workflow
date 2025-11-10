@@ -29,7 +29,7 @@ library(patchwork)
 
 ## Themes and colors
 ```{r}
-source(params$color_theme)
+#source(params$color_theme)
 ```
 
 
@@ -82,10 +82,10 @@ print(assay_names_df)
 
 
 ```{r}
-protein_mappings <- read.csv('Z:/omics/Proteomics_IMTM/Upload_2023-03-03/Protein_mappings.csv', sep = ';')
-protein_ipp_mapping <- read.delim('Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_featureAnnotation.txt')
-mrna_mappings <- read.csv('Z:/omics/mRNAseq_FIMM/Mapping2Gene_symbol/Ensembl_mappings_Deseq.csv', row.names = 1)
-lipid_mappings <- read.csv('Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_POS_EATRIS_20220902_MetaDataFeature.txt', sep ='\t')
+protein_mappings <- as.data.frame(mae[['Proteomics | imputed missing values']])
+protein_ipp_mappings <- as.data.frame(mae[['Proteomics-IPP']])
+mrna_mappings <- as.data.frame(mae[['mRNA-seq-2 | batch_adjusted | corrected']])
+lipid_mappings <- as.data.frame(mae[['Lipidomics, positive | transformed']])
 ```
 
 
@@ -122,8 +122,8 @@ pheno_df <- data.frame(colData(mae))
 
 ### Functions for plots
 ```{r}
-source('../SupportFunctions/ViolinPlot.R')
-source('../SupportFunctions/PlotCor2.R')
+source('ViolinPlot.R')
+source('PlotCor2.R')
 ```
 
 
@@ -144,7 +144,7 @@ plot_list <- lapply(metabolites, function(feature) {
   )
 })
 
-pdf("Z:/Results/2025_July_Rebuttal/MetabolitesSex.pdf", width = 10, height = 10)
+pdf("MetabolitesSex.pdf", width = 10, height = 10)
 do.call(grid.arrange, c(plot_list, ncol = 2))
 dev.off()
 ```
@@ -168,7 +168,7 @@ plot_list <- lapply(metabolites, function(feature) {
   )
 })
 
-pdf("Z:/Results/2025_July_Rebuttal/VLCFASex.pdf", width = 10, height = 10)
+pdf("VLCFASex.pdf", width = 10, height = 10)
 do.call(grid.arrange, c(plot_list, ncol = 2))
 dev.off()
 ```
@@ -186,7 +186,7 @@ rlm_sign_hits_Acc_Levine <- rlm_sign_hits[rlm_sign_hits$outcome == 'Age_acc_Levi
 
 ## Age acceleration BLUP
 ```{r}
-mrna <- assay_list[["mRNA-seq"]]
+mrna <- assay_list[["mRNA-seq-2 | batch_adjusted | corrected"]]
 ```
 
 ```{r}
