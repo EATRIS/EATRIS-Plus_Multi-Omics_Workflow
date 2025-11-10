@@ -27,6 +27,20 @@ config <- yaml::read_yaml(params$config)
 ```
 
 
+## R Libraries
+```{r, libraries}
+library(MOFA2)
+library(data.table)
+library(tidyr)
+library(dplyr)
+library(gridExtra)
+library(ggplot2)
+library(ggcorrplot)
+library(psych)
+library(ggpubr)
+library(rstatix)
+library(ggokabeito)
+```
 ## Read input data
 
 Input data is a MultiAssayExperiment (MAE) object. All or specified assays in the MAE will be used for analysis Multi-omics Factor Analysis (MOFA).
@@ -128,17 +142,11 @@ print(assay_names_df)
 For running MOFA, it is recommended to first remove known batch effects. 
 Make sure to use input data that were adjusted for batch effect if necessary.
 
-```{r load_mofa, message=FALSE}
-library(MOFA2)
-library(data.table)
-```
-
 Prepare MOFA input data: create a long data frame with sample, feature, view, 
 [group], and value. 
 
 ```{r functions_for_mofa_input, message=FALSE}
-library(tidyr)
-library(dplyr)
+
 
 #' Convert omics data to long format
 wide_to_long_keep_samples <- function(df) {
@@ -354,8 +362,6 @@ head(MOFAobject.trained@cache$variance_explained$r2_per_factor)
 Plot amount of variance explained by each factor per modality
 
 ```{r}
-library(ggplot2)
-
 expl_var <- c(
   get_variance_explained(MOFAobject.trained)$r2_per_factor$single_group)
 
@@ -429,23 +435,17 @@ require(dplyr)
 
 mofa_metadata <- as.data.frame(colData(mae)) %>%
   rename(sample = subject.id) %>%
-  mutate(Sex.PhenotypicFeature = paste(
-    as.character(Sex), 
-    ifelse(is.na(PhenotypicFeature), "", 
-           paste0("_", as.character(PhenotypicFeature))), 
-    sep = "")) %>%
-  select(c("sample", "Sex", "Age.group", "BMI.group", 
-           "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group", 
-           "PhenotypicFeature", "Genomic_Abberation"))
+  # mutate(Sex.PhenotypicFeature = paste(
+  #   as.character(Sex), 
+  #   ifelse(is.na(PhenotypicFeature), "", 
+  #          paste0("_", as.character(PhenotypicFeature))), 
+  #   sep = "")) %>%
+  select(c("sample", "Sex", "Age.group", "BMI.group", "Smoking.Status", 
+           "ABO.Blood.Group", "Rh.Blood.Group", "Genomic_Abberation"))
 
 samples_metadata(MOFAobject.trained) <- mofa_metadata
 ```
 
-
-```{r}
-library(ggcorrplot)
-library(psych)
-```
 
 ```{r}
 # get data
@@ -550,10 +550,6 @@ ggp
 #### Age
 
 ```{r}
-library(ggpubr)
-library(rstatix)
-library(ggokabeito)
-
 plot_factor_category <- function(MOFAobject.trained, 
                                  var, 
                                  excluded_categories = c(),
@@ -651,7 +647,7 @@ plot_factor_category <- function(MOFAobject.trained,
 ## Pick signficant differences for manuscript figure
 ```{r}
 
-library(gridExtra)
+
 ggp_sex <- plot_factor_category(MOFAobject.trained, "Sex", first_factor =  1, last_factor = 6, legend_position = 'right')
 ggp_age <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  9, last_factor = 11 , legend_position = 'right')
 ggp_bmi <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  1, last_factor =  2, legend_position = 'right')
@@ -668,8 +664,6 @@ dev.off()
 
 
 ```{r, fig.width=16, fig.height=5}
-library(gridExtra)
-
 ggp <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  1, last_factor =  4)
 ggp2 <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  5, last_factor =  8)
 ggp3 <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  9, last_factor =  12, legend_position = 'right')
