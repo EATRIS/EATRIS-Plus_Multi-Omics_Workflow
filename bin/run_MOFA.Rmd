@@ -434,7 +434,7 @@ mofa_metadata <- as.data.frame(colData(mae)) %>%
     ifelse(is.na(PhenotypicFeature), "", 
            paste0("_", as.character(PhenotypicFeature))), 
     sep = "")) %>%
-  select(c("sample", "Sex", "Sex.PhenotypicFeature", "Age.group", "BMI.group", 
+  select(c("sample", "Sex", "Age.group", "BMI.group", 
            "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group", 
            "PhenotypicFeature", "Genomic_Abberation"))
 
@@ -453,8 +453,7 @@ mofa_factors <- get_factors(MOFAobject.trained)$single_group
 continuous_phenotype_data <- as.data.frame(
   colData(mae))[, c("Age", "Height", "Weight", "BMI",
                     "Leukocytes", "Erythrocytes", "Hemoglobin", "Hematocrit",
-                    "Platelets", "MCV", "MCH", "MCHC", "Lymphocytes", "MXD",
-                    "Neutrophils" #, "Age_pred_BLUP", "Age_acc_BLUP", "Age_pred_Levine", "Age_acc_Levine"
+                    "Platelets", "MCV", "MCH", "MCHC", "Lymphocytes", "MXD", "Neutrophils" 
                     )]
 
 # calculate Spearman correlation
@@ -494,59 +493,6 @@ ggsave(file.path("MOFA_factors_vs_continuous.png"),
 ggp
 ```
 
-
-### Correlation with aCGH sum
-```{r, acgh}
-acgh_sums <- read.csv('Z:/omics/aCGH_IMTM/aCGH_sums.csv', row.names = 1)
-sums <- lapply(rownames(continuous_phenotype_data), function(x) {
-    
-    if (x %in% rownames(acgh_sums)) {
-        sum <- acgh_sums[x, 1]
-    }
-    else {
-        sum <- NA
-    }
-    sum
-})
-continuous_phenotype_data$aCGH_sums <- as.character(sums)
-continuous_phenotype_data$aCGH_sums[continuous_phenotype_data$aCGH_sums == 'NA'] <- NA
-continuous_phenotype_data$aCGH_sums <- as.numeric(sums)
-
-# calculate Spearman correlation
-mofa_factor_phenotype_cor <- cor(
-  continuous_phenotype_data,
-  mofa_factors, 
-  use = 'pairwise.complete.obs', 
-  method = "spearman")
-
-# calculate FDR-adjusted p-values
-mofa_factor_phenotype_sigtest = psych::corr.test(
-  continuous_phenotype_data,
-  mofa_factors, 
-  use = 'pairwise', 
-  method = "spearman",
-  adjust = "BH"
-)
-
-ggp <- ggcorrplot(
-  mofa_factor_phenotype_cor, 
-  hc.order = FALSE,
-  p.mat = mofa_factor_phenotype_sigtest$p.adj) 
-
-minmax <- max(abs(c(
-  min(mofa_factor_phenotype_cor), max(mofa_factor_phenotype_cor)
-)))
-minmax <- ifelse(
-  round(minmax, 1) < minmax, round(minmax+0.1, 1), round(minmax, 1))
-ggp <- ggp + scale_fill_gradient2(
-  limit = c(-minmax, minmax), 
-  low = "blue", high = "red", mid = "white", midpoint = 0
-)
-
-ggsave(file.path("MOFA_factors_vs_continuous_aCGH.png"), 
-       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-ggp
-```
 
 ### MOFA Factors vs Predicted Age
 
@@ -706,7 +652,7 @@ plot_factor_category <- function(MOFAobject.trained,
 ```{r}
 
 library(gridExtra)
-ggp_sex <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", first_factor =  1, last_factor = 6, legend_position = 'right')
+ggp_sex <- plot_factor_category(MOFAobject.trained, "Sex", first_factor =  1, last_factor = 6, legend_position = 'right')
 ggp_age <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  9, last_factor = 11 , legend_position = 'right')
 ggp_bmi <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  1, last_factor =  2, legend_position = 'right')
 
@@ -755,18 +701,18 @@ if (config$sample_selection$include_MALE &
 ```{r, fig.width=15, fig.height=5}
 if (config$sample_selection$include_MALE) {
   
-  ggp <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", 
-                       excluded_categories = "MALE_Klinefelter syndrome", first_factor =  1, last_factor =  4)
-  ggp2 <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", 
-                       excluded_categories = "MALE_Klinefelter syndrome", first_factor =  5, last_factor =  8)
-  ggp3 <- plot_factor_category(MOFAobject.trained, "Sex.PhenotypicFeature", 
-                       excluded_categories = "MALE_Klinefelter syndrome", first_factor =  9, last_factor =  12, legend_position = 'right')
+  ggp <- plot_factor_category(MOFAobject.trained, "Sex", 
+                       first_factor =  1, last_factor =  4)
+  ggp2 <- plot_factor_category(MOFAobject.trained, "Sex", 
+                       first_factor =  5, last_factor =  8)
+  ggp3 <- plot_factor_category(MOFAobject.trained, "Sex", 
+                       first_factor =  9, last_factor =  12, legend_position = 'right')
   
   grob1 <- ggplotGrob(ggp)
   grob2 <- ggplotGrob(ggp2)
   grob3 <- ggplotGrob(ggp3)
 
-  pdf("MOFA_factors_vs_Sex.PhenotypicFeature.group.pdf", width = 13, height = 4)
+  pdf("MOFA_factors_vs_Sex.group.pdf", width = 13, height = 4)
   grid.arrange(grob1, grob2, grob3, ncol = 3, widths =c(1,1,1.3))
   dev.off()
 }
@@ -827,10 +773,10 @@ ggp
 ### Genomic abberations
  
 ```{r, fig.width=15, fig.height=5}
-ggp <- plot_factor_category(MOFAobject.trained, "Genomic_Abberation")
-ggsave(file.path("MOFA_factors_vs_Gene_Abberation.png"), 
-       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-ggp
+# ggp <- plot_factor_category(MOFAobject.trained, "Genomic_Abberation")
+# ggsave(file.path("MOFA_factors_vs_Gene_Abberation.png"), 
+#        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
+# ggp
 ```
 
 
