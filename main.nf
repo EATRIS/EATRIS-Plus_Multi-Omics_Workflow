@@ -79,23 +79,23 @@ workflow {
 	
 
 	// General analysis 
-	//CELLTYPE_LEVELS(params.mae_object, params.r_config, params.references)
-	//SAMPLES_PER_OMICS(params.mae_object, params.r_config) 
+	CELLTYPE_LEVELS(params.mae_object, params.r_config, params.references)
+	SAMPLES_PER_OMICS(params.mae_object, params.r_config) 
 
 
 	// Single omics analyses
-	//RUN_CV(params.mae_object, params.r_config, params.references)
+	RUN_CV(params.mae_object, params.r_config, params.references)
 	LINEAR_MODELS(params.mae_object, params.r_config, params.references)
-	//SINGLE_FEATURES(params.mae_object, params.r_config, params.references, LINEAR_MODELS.out[1])
-	//RUN_PCA(params.mae_object, params.r_config, params.references)
+	SINGLE_FEATURES(params.mae_object, params.r_config, params.references, LINEAR_MODELS.out[1])
+	RUN_PCA(params.mae_object, params.r_config, params.references)
 	COMPARE_PROTEOMICS(params.mae_object, params.r_config, LINEAR_MODELS.out[1])
 	COMPARE_LIPIDOMICS(params.mae_object, params.r_config, LINEAR_MODELS.out[1])
 
 
 	// Multi omics analyses
-	//RUN_MOFA(params.mae_object, params.r_config, params.references)
-	//RIBOSOMAL_RNA_RANKS(params.mae_object, params.r_config, params.references)
-	//RUN_PLS2(params.mae_object, params.r_config, params.references)
+	RUN_MOFA(params.mae_object, params.r_config, params.references)
+	RIBOSOMAL_RNA_RANKS(params.mae_object, params.r_config, params.references)
+	RUN_PLS2(params.mae_object, params.r_config, params.references)
 	RUN_SNP_CPG(params.mae_object, params.rna_snp_file, params.snp_cpg_files)
 
 	// Similarity Network Fusion
