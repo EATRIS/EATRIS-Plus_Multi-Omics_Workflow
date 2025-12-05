@@ -1,0 +1,320 @@
+f---
+title: "Age prediction"
+author: "R. Toth"
+format: 
+  html:
+    theme: slate
+    toc: true
+    code: code-fold
+editor: visual
+execute:
+  warning: false
+---
+
+## Age prediction
+
+The age prediction based on methylation was done essentially by using the methylclock package. This package is using the most common methylation based clocks:
+
+-   Horvath's clock: It uses 353 CpGs described in Horvath (2013). It was trained using 27K and 450K arrays in samples from different tissues. Other three different age-related biomarkers are also computed:
+
+    -   AgeAcDiff (DNAmAge acceleration difference): Difference between DNAmAge and chronological age.
+
+    -   IEAA Residuals obtained after regressing DNAmAge and chronological age adjusted by cell counts.
+
+    -   EEAA Residuals obtained after regressing DNAmAge and chronological age. This measure was also known as DNAmAge acceleration residual in the first Horvath's paper.
+
+-   Hannum's clock: It uses 71 CpGs described in Hannum et al. (2013). It was trained using 450K array in blood samples. Another are-related biomarer is also computed:
+
+    -   AMAR (Apparent Methylomic Aging Rate): Measure proposed in Hannum et al. (2013) computed as the ratio between DNAm age and the chronological age.
+
+-   BNN: It uses Horvath's CpGs to train a Bayesian Neural Network (BNN) to predict DNAm age as described in Alfonso and Gonzalez (2020).
+
+-   Horvath's skin+blood clock (skinHorvath): Epigenetic clock for skin and blood cells. It uses 391 CpGs described in Horvath et al. (2018). It was trained using 450K EPIC arrays in skin and blood sampels.
+
+-   BLUP clock: It uses 319607 CpGs described in Zhang et al. (2019). It was trained using 450K and EPIC arrays in blood (13402 samples) and saliva (259 samples). Age predictors based on training sets with various sample sizes using Best Linear Unbiased Prediction (BLUP)
+
+-   EN clock: It uses 514 CpGs described in Zhang et al. (2019). It was trained using 450K and EPIC arrays in blood (13402 samples) and saliva (259 samples). Age predictors based on training sets with various sample sizes using Elastic Net (EN)
+
+-   Biological clocks:
+
+    -   Levine's clock (also know as PhenoAge): It uses 513 CpGs described in Levine et al. (2018). It was trained using 27K, 450K and EPIC arrays in blood samples.
+
+    -   Telomere Length's clock (TL): It uses 140 CpGs described in Lu et al. (2019) It was trained using 450K and EPIC arrays in blood samples.
+
+        The methylation clocks are based on Illumina array. Therefore, I have [downloaded](zwdzwd.github.io/InfiniumAnnotation) the Illumina manifests on hg38 and used it to get the methylation value of each overlapping CpG site.
+
+```{r}
+library(methrix)
+library(ggplot2)
+library(tidyverse)
+library(ggsci)
+library(ggpubr)
+library(MultiAssayExperiment)
+
+meth <- load_HDF5_methrix(dir="Z:/omics/EM-seq_UU/h5_QC_filtered")
+
+load("methylClocks.RData")
+age <-  readRDS("../../Age_prediction/age.RDS")
+
+#age <- age[,!grepl("Wu|PedBE", colnames(age))]
+#age$age <- NULL
+#colnames(age) <- gsub("Hovarth2", "skinHorvath", colnames(age))
+#saveRDS(age, "../Age_prediction/age.RDS")
+```
+
+However, in epidemiological studies one is interested in assessing whether age acceleration is associated with a given trait or condition. Three different measures can be computed:
+
+-   ageAcc: Difference between DNAmAge and chronological age.
+
+-   ageAcc2: Residuals obtained after regressing chronological age and DNAmAge (similar to IEAA).
+
+-   ageAcc3: Residuals obtained after regressing chronological age and DNAmAge adjusted for cell counts (similar to EEAA).
+
+    The cell counts were used as pre-calculated previously.
+
+
+##  REMOVE MIXUP SAMPLES ##
+```{r}
+mixupSamples <- c("CZC2898", "CZC2935")
+age <- age[!age$id %in% mixupSamples, ]
+```
+
+
+```{r}
+
+
+age_long <- age %>%
+  rename_with(., ~ ifelse(grepl("Acc|id", .x), .x, paste0("pred.", .x, recycle0 = TRUE))) %>%
+  pivot_longer(cols = !id) %>%
+  separate(name, into = c("type", "clock"), sep="\\." ) %>%
+  pivot_wider(names_from = "clock", values_from = "value")
+
+age_very_long <-  age %>%
+  rename_with(., ~ ifelse(grepl("Acc|id", .x), .x, paste0("pred.", .x, recycle0 = TRUE))) %>%
+  pivot_longer(cols = !id) %>%
+  separate(name, into = c("type", "clock"), sep="\\." ) %>%
+  inner_join(., as.data.frame(meth@colData), by=join_by(id==subject.id))
+
+
+age_very_long %>%
+ggplot(aes(clock, value))+
+#geom_violin()+
+  geom_violin()+
+  geom_jitter(shape=21, color="black", width = 0.2)+
+  facet_wrap(~type)+theme_bw()+theme(legend.position = "none") 
+
+age_very_long %>%
+  filter(type=="ageAcc3") %>%
+  ggplot(aes(value, Age, fill=clock))+
+  #geom_smooth(method = "lm", se = FALSE, 
+  #            color = "black") + 
+  #ggpmisc::stat_poly_eq( aes(label = paste(..eq.label.., ..rr.label..,  sep = "~~~")), parse = TRUE)+
+  geom_violin()+
+  geom_jitter(shape=21, color="black", width = 0.2)+
+  facet_wrap(~clock)+theme_bw()+theme(legend.position = "none") 
+
+```
+
+```{r}
+age_very_long %>%
+  filter(clock!="TL")%>%
+  filter(type=="pred") %>%
+  ggplot(aes(value, Age, fill=clock))+
+  geom_smooth(method = "lm", se = FALSE, 
+              color = "black") + 
+  ggpmisc::stat_poly_eq( aes(label = paste( ..rr.label..,  sep = "~~~")), parse = TRUE, label.x=0.1, label.y=1)+
+  geom_point(shape=21)+
+    facet_wrap(~clock)+theme_bw()+theme(legend.position = "none")
+
+
+
+#..eq.label..,
+```
+
+### Association of accelerated age with phenotype
+
+```{r}
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Sex),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock !="TL") %>%
+ggviolin(., color="clock", x="Sex", y="value", facet.by = "clock", add="jitter", palette="jco")+
+stat_compare_means(comparisons = my_comparisons, label.y=20)+theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=))
+
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Smoking.Status),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock !="TL") %>%
+ggviolin(., color="clock", x="Smoking.Status", y="value", facet.by = "clock", add="jitter", palette="jco")+
+#stat_compare_means(comparisons = my_comparisons, )+
+     stat_compare_means(method="anova")+
+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock =="EN") %>%
+ggviolin(., color="clock", x="Smoking.Status", y="value",  add="jitter", palette="jco")+
+#stat_compare_means(comparisons = my_comparisons, )+
+     stat_compare_means(method="anova")+
+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=10))
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$ABO.Blood.Group),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock !="TL") %>%
+ggviolin(., color="clock", x="ABO.Blood.Group", y="value", facet.by = "clock", add="jitter", palette="jco", )+
+#stat_compare_means(comparisons = my_comparisons)+
+     stat_compare_means(method="anova")+
+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock  %in% c("BLUP", "Levine")) %>%
+ggviolin(., color="clock", x="ABO.Blood.Group", y="value", facet.by = "clock", add="jitter", palette="jco",draw_quantiles = 0.5 )+ylab("Age acceleration")+
+#stat_compare_means(comparisons = my_comparisons)+
+     stat_compare_means(method="anova")+
+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=10), text=element_text(size=10))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock !="TL") %>%
+ggscatter(., color="clock",
+x="BMI", y="value",
+facet.by = "clock",
+palette="jco",
+add="reg.line", cor.coef=T)+theme(legend.position = "none")
+
+
+
+```
+
+```{r}
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Sex),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc2" & clock !="TL") %>%
+ggviolin(., color="clock", x="Sex", y="value", facet.by = "clock", add="jitter", palette="jco")+
+stat_compare_means(comparisons = my_comparisons, label.y=20)+theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=))
+
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Smoking.Status),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc2" & clock !="TL") %>%
+ggviolin(., color="clock", x="Smoking.Status", y="value", facet.by = "clock", add="jitter", palette="jco")+
+#stat_compare_means(comparisons = my_comparisons, )+
+     stat_compare_means(method="anova")+
+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$ABO.Blood.Group),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc2" & clock !="TL") %>%
+ggviolin(., color="clock", x="ABO.Blood.Group", y="value", facet.by = "clock", add="jitter", palette="jco", )+
+#stat_compare_means(comparisons = my_comparisons)+
+     stat_compare_means(method="anova")+
+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+
+age_very_long %>%
+filter(type=="ageAcc2" & clock !="TL") %>%
+ggscatter(., color="clock",
+x="BMI", y="value",
+facet.by = "clock",
+palette="jco",
+add="reg.line", cor.coef=T)+theme(legend.position = "none")
+
+```
+
+### Association of telomere length with phenotype
+
+```{r}
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Sex),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock =="TL") %>%
+ggviolin(., color="clock", x="Sex", y="value", add="jitter", palette="jco")+
+stat_compare_means(comparisons = my_comparisons, label.y=20)+theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=))
+
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Smoking.Status),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock =="TL") %>%
+ggviolin(., color="clock", x="Smoking.Status", y="value", add="jitter", palette="jco")+
+     stat_compare_means(method="anova")+
+#stat_compare_means(comparisons = my_comparisons, )+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$ABO.Blood.Group),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock =="TL") %>%
+ggviolin(., color="clock", x="ABO.Blood.Group", y="value",  add="jitter", palette="jco", )+
+#stat_compare_means(comparisons = my_comparisons)+
+   stat_compare_means(method="anova")+
+theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+
+age_very_long %>%
+filter(type=="ageAcc3" & clock =="TL") %>%
+ggscatter(., color="clock",
+x="BMI", y="value",
+palette="jco",
+add="reg.line", cor.coef=T)+theme(legend.position = "none")
+
+
+
+```
+
+### Association of age with phenotype
+
+```{r}
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Sex),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc" & clock !="TL") %>%
+ggviolin(., color="clock", x="Sex", y="value", facet.by = "clock", add="jitter", palette="jco")+
+stat_compare_means(comparisons = my_comparisons, label.y=20)+theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=))
+
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$Smoking.Status),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc" & clock !="TL") %>%
+ggviolin(., color="clock", x="Smoking.Status", y="value", facet.by = "clock", add="jitter", palette="jco")+
+#stat_compare_means(comparisons = my_comparisons, )+
+  stat_compare_means(method="anova")+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+my_comparisons <- as.list(as.data.frame(combn(unique(age_very_long$ABO.Blood.Group),m=2, simplify = T)))
+
+age_very_long %>%
+filter(type=="ageAcc" & clock !="TL") %>%
+ggviolin(., color="clock", x="ABO.Blood.Group", y="value", facet.by = "clock", add="jitter", palette="jco", )+
+#stat_compare_means(comparisons = my_comparisons)+
+   stat_compare_means(method="anova")+
+  theme(legend.position = "none", axis.text.x = element_text(angle=60, hjust=1, size=6), text=element_text(size=6))
+
+
+age_very_long %>%
+filter(type=="ageAcc" & clock !="TL") %>%
+ggscatter(., color="clock",
+x="BMI", y="value",
+facet.by = "clock",
+palette="jco",
+add="reg.line", cor.coef=T)+theme(legend.position = "none")
+
+
+
+```
+
+```{r, eval=F}
+multiomics <- readRDS("Z:/omics/MultiAssayExperiments/h5MAE_wMissingValues/mae_mae.rds")
+```

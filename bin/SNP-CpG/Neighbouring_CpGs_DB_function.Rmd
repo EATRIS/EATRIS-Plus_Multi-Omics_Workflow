@@ -1,0 +1,604 @@
+---
+title: "Neighbouring_CpGs"
+author: "Daniel Beisly"
+date: "2024-04-08"
+output: html_document
+#The input of filtered_snps for chromosome 22 is empty. So we are looking at Identify sig CpG-SNPs.
+---
+### Test set for chromosome 22 ###
+
+# Libraries
+```{r}
+library(methrix)
+library(GenomicScores)
+library(MafDb.1Kgenomes.phase3.GRCh38)
+library(vcfR)
+library(GenomicRanges)
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(ggplot2)
+library(ggpubr)
+library(ggpointdensity)
+library(RColorBrewer)
+library(parallel)
+```
+
+
+#Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/
+
+```{r}
+Neighbour_CpGs <- function(chromosome_number) {
+  
+#File paths
+qc_filtered_gt_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/qc_filtered_gt", chromosome_number, ".csv")
+
+allele_gt_df_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/allele_gt_df", chromosome_number, ".csv")
+
+meth_no_snps_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/meth", chromosome_number, "_no_snps")
+
+meth_snps_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/meth", chromosome_number, "_snps")
+
+filtered_snps_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/filtered_snps", chromosome_number, ".csv")
+
+# Files
+#meth_no_snps & meth_snps both load the full methrix of 522527 elements????
+
+#Need result of Extract Genotypes
+qc_filtered_gt <- read.csv(qc_filtered_gt_file_path)
+
+#This one is corrected 
+filtered_samples <- read.csv("Z:/omics/Methylation/Daniel_files/filtered_samples.csv")
+
+#Need to rerun Beta_values
+meth22_no_snps <- load_HDF5_methrix(meth_no_snps_file_path)
+
+#
+meth22_snps <- load_HDF5_methrix(meth_snps_file_path)
+
+#Need result of Extract Genotypes
+allele_gt_df <- read.csv(allele_gt_df_file_path)
+
+filtered_snps <- read.csv(filtered_snps_file_path)
+
+#Doing this we make sure they are an equal size, no unncessary SNPs
+#allele_gt_df <- allele_gt_df[allele_gt_df$POS %in% filtered_snps$POS, ]
+#filtered_snps <- filtered_snps[filtered_snps$POS %in% allele_gt_df$POS,  , drop = FALSE]
+#Could be something to do with filtered_snps & allele_gt_df as when we make them the same, it does work.
+
+# Make a dataframe with all the CpG sites that have methylation data. 
+
+#Extract all the SNP positions (after filtering) and their genotypes in a dataframe.
+snps_pos_gt <- as.data.frame(qc_filtered_gt[, 1:2])
+names(snps_pos_gt) <- names(qc_filtered_gt[1:2]) 
+snps_pos_gt <- as.data.frame(t(snps_pos_gt))
+colnames(snps_pos_gt) <- 1:ncol(snps_pos_gt)
+rownames(snps_pos_gt) <- c("SNP_position", "SNP_gt")
+
+##Extract the beta values of all the CpG sites (include the CpG sites that overlap with SNPs).
+#Get the methylation matrixes of all CpG sites.
+beta22_no_snps_NA <- get_matrix(meth22_no_snps, type = 'M', add_loci =  TRUE)
+beta22_snps_NA <- get_matrix(meth22_snps, type = 'M', add_loci =  TRUE)
+
+#Keep the CpG sites that have a beta value in at least 80% of the samples. 
+beta22_no_snps <- beta22_no_snps_NA[(rowMeans(is.na(beta22_no_snps_NA))) <= 0.2, ]
+beta22_snps <- beta22_snps_NA[(rowMeans(is.na(beta22_snps_NA))) <= 0.2, ]
+
+#Keep the samples that were kept after filtering and change the layout of the dataframe (samples as rows, snps as columns).
+#For the CpG sites that dont overlap with SNPs.
+beta22_no_snps <- select(beta22_no_snps, all_of(c("start", filtered_samples$Samples)))
+start_col_no_snps <- beta22_no_snps[, 1]
+samples_cols_no_snps <- apply(beta22_no_snps[, -1], 2, function(x) round(x, digits = 2))
+beta22_no_snps <- cbind(start_col_no_snps, samples_cols_no_snps)
+beta22_no_snps <- as.data.frame(lapply(beta22_no_snps, as.character), stringsAsFactors = FALSE)
+beta22_no_snps <- as.data.frame(t(beta22_no_snps), stringsAsFactors = FALSE)
+samples_row_no_snps <- rownames(beta22_no_snps)
+beta22_no_snps <- as.data.frame(lapply(beta22_no_snps, as.numeric))
+colnames(beta22_no_snps) <- beta22_no_snps[1, ]
+rownames(beta22_no_snps) <- samples_row_no_snps
+all_cpgs_beta <- beta22_no_snps[-1, ]
+
+
+# Find for every meCpG-SNP the neighbouring (1000 bps up/down stream) CpG sites methylation values.
+
+#Turn the data frame with the CpG sites and the data frame with the meCpG-SNPs into Granges objects.
+cpgs_start <- as.numeric(colnames(all_cpgs_beta))
+cpgs_end <- cpgs_start + 1
+cpgs_gr <- GRanges(seqnames ="chr22", ranges = IRanges(start = cpgs_start, end = cpgs_end))
+snps_gr <- GRanges(seqnames = "chr22", ranges = IRanges(start = filtered_snps$POS, end = filtered_snps$POS))
+
+#Define neighboring window. 
+upstream <- 1000
+downstream <- 1000
+neigboring_window <- GRanges(seqnames(snps_gr), ranges = IRanges(start = (start(snps_gr) - upstream), end = (end(snps_gr) + downstream)))
+
+#Find the mean beta value per CpG site.
+all_cpgs_mean_beta <- t(as.data.frame(colMeans(all_cpgs_beta, na.rm = TRUE)))
+rownames(all_cpgs_mean_beta)[1] <- "Beta_all_Genotypes"
+all_cpgs_mean_beta <- as.data.frame(all_cpgs_mean_beta)
+all_cpgs_mean_beta[1,] <- round(all_cpgs_mean_beta[1,], 2)
+all_cpgs_mean_beta <- t(all_cpgs_mean_beta)
+all_cpgs_mean_beta <- as.data.frame(all_cpgs_mean_beta)
+all_cpgs_mean_beta$CpG <- as.numeric(rownames(all_cpgs_mean_beta))
+rownames(all_cpgs_mean_beta) <- NULL
+all_cpgs_mean_beta <- all_cpgs_mean_beta %>% relocate (CpG, .before = Beta_all_Genotypes)
+
+#Find the CpG sites and their beta values, within the neighboring window of each snp.
+cpgs_in_window_info <- list()
+for (i in seq_along(neigboring_window)) {
+  snp_window <- neigboring_window[i]
+  cpgs <- findOverlaps(snp_window, cpgs_gr)
+  if (length(cpgs) > 0) {
+    cpgs_in_window <- start(cpgs_gr[subjectHits(cpgs)])
+    cpgs_beta_in_window <- all_cpgs_mean_beta$Beta_all_Genotypes[all_cpgs_mean_beta$CpG %in% cpgs_in_window]
+    cpgs_in_window_info[[i]] <- data.frame(
+      cpg_sites <- cpgs_in_window,
+      beta_values <- cpgs_beta_in_window)
+  }
+}
+for (i in seq_along(cpgs_in_window_info)) {
+  snp_pos <- filtered_snps$POS[i]
+  names(cpgs_in_window_info)[i] <- snp_pos
+}
+
+#cpgs_in_window_info does have names! 
+# Filter out empty SNPs, so SNPs that have no CpGs present in that window. 
+# From the 9488 SNPs, 9463 were kept. 
+snp_cpgs_in_window <- list()
+for (i in names(cpgs_in_window_info)) {
+  if (length(cpgs_in_window_info[[i]]) > 0) {
+    snp_cpgs_in_window[[i]] <- cpgs_in_window_info[[i]]
+  }
+}
+#snp_cpgs_in_window does have names for each dataframe!
+
+# Find the distance of each CpG to each SNP.
+snp_cpgs_distance <- list()
+for (i in seq_along(snp_cpgs_in_window)) {
+  snp <- as.numeric(names(snp_cpgs_in_window[i]))
+  cpg_sites <- snp_cpgs_in_window[[i]]$cpg_sites....cpgs_in_window
+  distances <- abs(snp - cpg_sites)
+  snp_cpgs_distance[[i]] <- data.frame(
+    SNP = snp,
+    Distance = distances,
+    CpG = cpg_sites)
+}
+snp_cpgs_distance <- as.data.frame(do.call(rbind, snp_cpgs_distance))
+snp_cpgs_distance <- snp_cpgs_distance %>% relocate (CpG, .before = Distance)
+
+# Check if there are duplicated CpG (present in more than one SNP). 
+# From the 290,849 CpGs, 117,805 were present only once as neighboring CpGs. 67,582 neighboring CpGs were present more than once. 
+snp_cpgs_distance_duplicated <- snp_cpgs_distance %>% 
+  group_by(CpG) %>% summarise(n = n()) %>%
+  filter(n > 1)
+snp_cpgs_distance_unique <- snp_cpgs_distance %>%
+  anti_join(snp_cpgs_distance_duplicated, by = "CpG")
+
+# Add the beta values to the CpG sites. 
+all_cpgs_beta_t <- as.data.frame(t(all_cpgs_beta))
+all_cpgs_beta_t$CpG <- rownames(all_cpgs_beta_t) 
+rownames(all_cpgs_beta_t) <- NULL
+all_cpgs_beta_t <- all_cpgs_beta_t %>% relocate (CpG, .before = CZC2546)
+all_cpgs_beta_t$CpG <- as.numeric(all_cpgs_beta_t$CpG)
+cpgs_beta <- inner_join(all_cpgs_beta_t, snp_cpgs_distance_unique, by = "CpG")
+cpgs_beta <- cpgs_beta %>% mutate(SNP = snp_cpgs_distance_unique$SNP)
+cpgs_beta <- cpgs_beta %>% relocate (SNP, .after = CpG)
+cpgs_beta <- cpgs_beta %>% select(-Distance)
+
+
+# Make a function that stores the sample names of the different genotypes and their counts, for each cpg site, in a list.
+
+process_cpg_position <- function(cpg_position, cpgs_beta, qc_filtered_gt) {
+
+  # Extract beta values of closest CpG site of interest. 
+  cpg_beta <- cpgs_beta[cpgs_beta$CpG == cpg_position, ]
+  
+  # Identify the SNP position.
+  snp_position <- cpgs_beta$SNP[cpgs_beta$CpG == cpg_position]
+
+  # Find the three genotypes for the SNP position.
+  snp_position_gt <- qc_filtered_gt[qc_filtered_gt$POS == as.character(snp_position), ]
+  snp_position_gt <- as.data.frame(t(snp_position_gt))
+  snp_position_gt <- snp_position_gt[-c(1,2), , drop = FALSE]
+  snp_position_gt <- snp_position_gt[row.names(snp_position_gt) %in% rownames(all_cpgs_beta),
+                                     , drop = FALSE]
+  colnames(snp_position_gt) <- "Genotype"
+  
+  ### This is where we have WT/Hetero/Homo groups.
+  ### So likely up to here we don't have to change anything.
+  
+  # Split the samples based on the genotypes.
+  snp_WT_samples <- snp_position_gt[snp_position_gt[, 1] == "0/0", , drop = FALSE]
+  snp_heter_alt_samples <- snp_position_gt[snp_position_gt[, 1] == "0/1", , drop = FALSE]
+  snp_homo_alt_samples <- snp_position_gt[snp_position_gt[, 1] == "1/1", , drop = FALSE]
+  snp_gt_samples <- list(WT_samples = rownames(snp_WT_samples), Heter_alt_samples = rownames(snp_heter_alt_samples), Homo_alt_samples = rownames(snp_homo_alt_samples))
+  return(snp_gt_samples)
+}
+
+# Set the cpg_position argument as a numeric variable with all the cpg positions.  
+cpg_position <- cpgs_beta$CpG
+ 
+# Apply the above function to all the cpgs in order to store the sample names of the different genotypes and their counts, for each cpg site, in a list. # Took 15 minutes.
+
+#grouped_samples list might not have same number of elements as cpg_beta$CpG
+#group_samples could have fewer elements due to errors in parLappyly or if some elements of cpg_positions failted to process correctly.
+#If cpgs_beta$CpG is longer or shorter than grouped_samples, the 'names' assignment will fail
+
+#length of grouped_samples = 113630
+#length of cpgs_beta$CpG = 117805
+#Either of these is not appropriate or something needs to change
+
+#We replaced this code with some else in file "Testing_nothingserious.Rmd"
+#
+
+#grouped_samples does not have names for each dataframe in the list. It should have the CpG name if I am correct.
+
+#Main processing codes with checks
+system.time({
+  #Align cpg_position with cpgs_beta$CpG
+  cpg_position <- intersect(cpg_position, cpgs_beta$CpG)
+  #Detect number of cores and create a cluster
+  n_cores <- detectCores() -1 #Leave one core free
+  cluster <- makeCluster(n_cores)
+  
+  #Export variables and function to the cluster
+  clusterExport(cluster, varlist =c("cpg_position", "process_cpg_position", "cpgs_beta", "qc_filtered_gt", "all_cpgs_beta"))
+  
+  #run the processing in parallel
+  grouped_samples <- parLapply(cluster, cpg_position, function(x){
+    tryCatch({
+      #Log progress
+      message("Processing CpG position: ", x)
+      #Call the processing function
+      result <- process_cpg_position(x, cpgs_beta, qc_filtered_gt)
+      message("Succesffuly processed CpG position: ", x)
+      return(result)
+    }, error = function(e) {
+      #Log the error and return the NULL for failed positions
+      message("Error processing CpG position: ", x, " - ", e$message)
+      return(NULL)
+    })
+  })
+  
+  #Stop the cluster after processing
+  stopCluster(cluster)
+  
+  #Filter out NULL results from the output
+  #grouped_samples <- Filter(Negate(is.null), grouped_samples)
+  
+  #Length mismatch: Cannot aisgn names to grouped_samples
+  #Because allele_gt_df
+  # and filtered_snps are unequal the names in the last are [[1]]
+  #Length of grouped_samples: 113630
+  #Length of cpgs_beta$CpG
+  #Check lengths of grouped_samples and cpgs_beta$CpG before assigning names
+  if (length(grouped_samples) == nrow(cpgs_beta)) {
+    #Assign names to grouped_samples
+    names(grouped_samples) <- cpgs_beta$CpG
+  } else {
+    #Log a warning of lengths dont match
+    warning("Length mismatch: Cannot asign names to grouped_samples")
+    message("Length of grouped_samples: ", length(grouped_samples))
+    message("Length of cpgs_beta$CpG: ", nrow(cpgs_beta))
+  }
+  })
+
+#Fix grouped_samples list. Dataframes dont have names. Should have names, check below. Pretty sure they should be named after CPG position
+#We replaced this code with some else in file "Testing_nothingserious.Rmd"
+#names(grouped_samples <- cpgs_beta$CpG) is messed up.
+
+# Make a function that calculates the beta value of each closest cpg for every sample that exists in the three different genotypes.
+
+get_cpg_beta_per_gt <- function(cpg_position, grouped_samples, cpgs_beta) {
+  
+  # Extract the genotype samples for that particular cpg.
+  cpg <- grouped_samples[[as.character(cpg_position)]]
+
+  cpg_wt_samples <- as.data.frame(cpg[["WT_samples"]])
+  cpg_heter_alt_samples <- as.data.frame(cpg[["Heter_alt_samples"]])
+  cpg_homo_alt_samples <- as.data.frame(cpg[["Homo_alt_samples"]])
+
+  # Extract beta values of the closest CpGs when the SNP position has different genotypes.
+  cpg_beta <- cpgs_beta[cpgs_beta$CpG == cpg_position, ]
+
+  cpgs_beta_wt_gt <- as.data.frame(cpg_beta[, colnames(cpg_beta) %in%
+                                                      cpg_wt_samples$`cpg[["WT_samples"]]`])
+  cpgs_beta_heter_alt_gt <- as.data.frame(cpg_beta[, colnames(cpg_beta) %in%
+                                                             cpg_heter_alt_samples$`cpg[["Heter_alt_samples"]]`])
+  cpgs_beta_homo_alt_gt <- as.data.frame(cpg_beta[, colnames(cpg_beta) %in%
+                                                            cpg_homo_alt_samples$`cpg[["Homo_alt_samples"]]`])
+  # Remove the samples with NA values.
+  cpgs_beta_wt_gt <- cpgs_beta_wt_gt[, colSums(is.na(cpgs_beta_wt_gt)) != nrow(cpgs_beta_homo_alt_gt), drop = FALSE]
+  cpgs_beta_heter_alt_gt <- cpgs_beta_heter_alt_gt[, colSums(is.na(cpgs_beta_heter_alt_gt)) != nrow(cpgs_beta_homo_alt_gt), drop = FALSE]
+  cpgs_beta_homo_alt_gt <- cpgs_beta_homo_alt_gt[, colSums(is.na(cpgs_beta_homo_alt_gt)) != nrow(cpgs_beta_homo_alt_gt), drop = FALSE]
+
+  cpg_gt_betas <- list(WT_beta = cpgs_beta_wt_gt, Heter_alt_beta = cpgs_beta_heter_alt_gt, Homo_alt_beta = cpgs_beta_homo_alt_gt)
+  return(cpg_gt_betas)
+}
+
+# Set the cpg_position argument as a numeric variable with all the cpg positions.  
+cpg_position <- cpgs_beta$CpG
+
+# Apply the above function to all the cpgs in order to calculate the beta value of each cpg for every sample that exists in the three different genotypes. # Took 13 minutes.
+system.time({
+  n_cores <- detectCores()
+  cluster <- makeCluster(n_cores)
+  clusterExport(cluster, varlist = c("cpg_position", "get_cpg_beta_per_gt", "cpgs_beta", "grouped_samples"))
+  cpgs_gt_betas <- parLapply(cluster, cpg_position, function(x) get_cpg_beta_per_gt(x, grouped_samples, cpgs_beta))})
+stopCluster(cluster)
+names(cpgs_gt_betas) <- cpgs_beta$CpG
+
+
+# Make a function that calculates the row means considering that there might be dataframes with only one row and only one column and also empty ones.
+
+row_means <- function(df) {
+  if (is.data.frame(df) && nrow(df) == 1 && ncol(df) == 1) {
+    return(df[[1]])
+  } else if (is.data.frame(df)) {
+    return(rowMeans(df, na.rm = TRUE))
+  } else {
+    return(NA)
+  }
+}
+
+
+# Make a function that calculates the mean beta value of the three different genotypes of each cpg.
+
+get_cpg_mean_betas <- function(cpg_position, cpgs_gt_betas) {
+    
+  # Extract the genotype samples for that particular cpg.
+  cpg_beta_WT <- cpgs_gt_betas[[as.character(cpg_position)]][["WT_beta"]]
+  cpg_beta_Heter_alt <- cpgs_gt_betas[[as.character(cpg_position)]][["Heter_alt_beta"]]
+  cpg_beta_Homo_alt <- cpgs_gt_betas[[as.character(cpg_position)]][["Homo_alt_beta"]]
+  
+  # Calculate the mean beta values per genotype for that particular cpg. 
+  cpg_mean_wt <- row_means(cpg_beta_WT)
+  cpg_mean_wt <- round(cpg_mean_wt, 2)
+  cpg_mean_wt <- cpg_mean_wt[[1]]
+  
+  cpg_mean_heter_alt <- row_means(cpg_beta_Heter_alt)
+  cpg_mean_heter_alt <- round(cpg_mean_heter_alt, 2)
+  cpg_mean_heter_alt <- cpg_mean_heter_alt[[1]]
+  
+  cpg_mean_homo_alt <- row_means(cpg_beta_Homo_alt)
+  cpg_mean_homo_alt <- round(cpg_mean_homo_alt, 2)
+  cpg_mean_homo_alt <- cpg_mean_homo_alt[[1]]
+  
+  # Merge the mean beta values of the different genotypes.
+  cpg_gt_mean_beta <- list(WT_mean_beta = cpg_mean_wt, Heter_alt_mean_beta = cpg_mean_heter_alt, Homo_alt_mean_beta = cpg_mean_homo_alt)  
+  return(cpg_gt_mean_beta)
+}
+
+# Set the cpg_position argument as a numeric variable with all the cpg positions.  
+cpg_position <- cpgs_beta$CpG
+
+# Apply this function to all the cpg sites to get the mean beta values of each cpg site per genotype per snp. # Took 6 minutes.
+#Something might wrong here.
+#cpg_position is not empty.
+
+system.time({
+  n_cores <- detectCores()
+  cluster <- makeCluster(n_cores)
+  clusterExport(cluster, varlist = c("cpg_position", "get_cpg_mean_betas", "cpgs_gt_betas", "row_means"))
+  cpgs_gt_mean_betas <- parLapply(cluster, cpg_position, function(x) get_cpg_mean_betas(x, cpgs_gt_betas))})
+stopCluster(cluster)
+names(cpgs_gt_mean_betas) <- cpgs_beta$CpG
+
+# Make a loop that filters out the SNPs that have NAs in any of the three genotypes. 
+cpgs_gt_mean_betas_clean <- list()
+cpgs_gt_mean_betas_NAs <- list()
+  for (cpg in names(cpgs_gt_mean_betas)) {
+  cpgs <- cpgs_gt_mean_betas[[cpg]]
+  if(any(is.na(unlist(cpgs)))) {
+    cpgs_gt_mean_betas_NAs[[cpg]] <- cpgs
+  } else {
+    cpgs_gt_mean_betas_clean[[cpg]] <- cpgs
+  }
+}
+
+
+# Bin the SNPs with their CpGs based on the distances. 
+
+# Select the CpGs that were kept after filtering. 
+snp_cpgs <- cpgs_beta[, 1:2]
+snp_cpgs_clean <- snp_cpgs[snp_cpgs$CpG %in% names(cpgs_gt_mean_betas_clean), ]
+
+# Calculate the absolute distance between each SNP and its closest CpG. 
+cpg_abs_distance <- snp_cpgs_clean %>%
+  mutate(Distance = abs(SNP - CpG))
+
+# Calculate the distance between each SNP and its closest CpG. 
+cpg_distance <- snp_cpgs_clean %>%
+  mutate(Distance = (SNP - CpG))
+
+# Separate the distances to negative and positive. 
+cpg_distance_negative <- cpg_distance[cpg_distance$Distance < 0, ]
+cpg_distance_positive <- cpg_distance[cpg_distance$Distance >= 0, ]
+
+#summary(cpg_distance_positive$Distance) shows empty dataframe
+#names(cpg_distance_positive) does show "distance" column.
+#dim(cpg_distance_positive) shows 0 rows and 3 columns
+#How was cpg_distance_positive derived?
+#Derived from cpg_distance, which is also empty.
+
+
+#Warning in max(cpg_distance_positive$Distance) :
+#  no non-missing arguments to max; returning -Inf
+#Error in seq.default(0, max(cpg_distance_positive$Distance), by = 50) : 
+#  'to' must be a finite number
+
+# Bin the CpGs based on those distances. Make beans of 50 bp difference each. 
+cpg_bins <- cut(cpg_distance_positive$Distance, breaks = seq(0, max(cpg_distance_positive$Distance), by = 50))
+cpg_distance_downstream <- cpg_distance_positive %>%
+  mutate(Bin = cpg_bins)
+rownames(cpg_distance_downstream) <- NULL
+
+cpg_distance_negative$Distance <- abs(cpg_distance_negative$Distance)
+cpg_bins <- cut(cpg_distance_negative$Distance, breaks = seq(0, max(cpg_distance_negative$Distance + 1), by = 50))
+cpg_distance_upstream <- cpg_distance_negative %>%
+  mutate(Bin = cpg_bins)
+cpg_distance_upstream <- cpg_distance_upstream[complete.cases(cpg_distance_upstream$Distance), ]
+rownames(cpg_distance_upstream) <- NULL
+
+
+# Calculate the delta beta of the WT genotype to the Heter/Homo alternative genotypes for every snp.
+
+# Make a function that calculates the Delta beta (Db) of the neighboring CpGs when the SNP has WT and Heterozygous for the alternative allele genotypes. 
+calculate_Db_wt_heter <- function(cpg) {
+  WT_mean_beta <- cpg$WT_mean_beta
+  Heter_alt_mean_beta <- cpg$Heter_alt_mean_beta
+  mean_beta_threshold <- 0.01
+  if (abs(WT_mean_beta) <= mean_beta_threshold && abs(Heter_alt_mean_beta) <= mean_beta_threshold) {
+    Db <- 0
+  } else { 
+  Db <- ( Heter_alt_mean_beta - WT_mean_beta)
+  }
+  return(Db)
+}
+
+# Apply this function to all cpgs. 
+#Contains CpG position and the delta/Beta value for heterozygous wt positions
+cpgs_Db_wt_heter_gt <- lapply(cpgs_gt_mean_betas_clean, calculate_Db_wt_heter)
+
+# Turn the list with the WT-Heter genotype Delta beta per snp into a dataframe.
+cpgs_Db_wt_heter_gt <- data.frame(CpG = names(cpgs_Db_wt_heter_gt), Delta_beta = unlist(cpgs_Db_wt_heter_gt))
+rownames(cpgs_Db_wt_heter_gt) <- NULL
+cpgs_Db_wt_heter_gt$Delta_beta <- round(cpgs_Db_wt_heter_gt$Delta_beta, 2)
+
+# Make a function that calculates the Delta beta (Db) of the neighboring CpGs when the SNP has WT and Homozygous for the alternative allele genotypes.  
+calculate_Db_wt_homo <- function(cpg) {
+  WT_mean_beta <- cpg$WT_mean_beta
+  Homo_alt_mean_beta <- cpg$Homo_alt_mean_beta
+  mean_beta_threshold <- 0.01
+  if (abs(WT_mean_beta) <= mean_beta_threshold && abs(Homo_alt_mean_beta) <= mean_beta_threshold) {
+    Db <- 0
+  } else { 
+  Db <- ( Homo_alt_mean_beta - WT_mean_beta)
+  }
+  return(Db)
+}
+
+# Apply this function to all cpgs.
+#Contains CpG position and the delta/Beta value for homozygous wt positions
+cpgs_Db_wt_homo_gt <- lapply(cpgs_gt_mean_betas_clean, calculate_Db_wt_homo)
+
+# Turn the list with the WT-Heter genotype Delta beta per snp into a dataframe.
+cpgs_Db_wt_homo_gt <- data.frame(CpG = names(cpgs_Db_wt_homo_gt), Delta_beta = unlist(cpgs_Db_wt_homo_gt))
+rownames(cpgs_Db_wt_homo_gt) <- NULL
+cpgs_Db_wt_homo_gt$Delta_beta <- round(cpgs_Db_wt_homo_gt$Delta_beta, 2)
+
+# Merge the two Db dataframes.
+#Contains CpG position and the delta/Beta value for homo and heterozygous wt positions
+cpgs_db_gt <- merge(cpgs_Db_wt_heter_gt, cpgs_Db_wt_homo_gt, by = "CpG")
+colnames(cpgs_db_gt) <- c("CpG", "WT_Heter_alt_Delta_beta", "WT_Homo_alt_Delta_beta")
+cpgs_db_gt$CpG <- as.numeric(cpgs_db_gt$CpG)
+
+# Split the merged dataframe with the Dbs, to upstream and downstream CpGs.
+upstream_cpgs_db_gt <- cpgs_db_gt[cpgs_db_gt$CpG %in% cpg_distance_upstream$CpG, ]
+rownames(upstream_cpgs_db_gt) <- NULL
+downstream_cpgs_db_gt <- cpgs_db_gt[cpgs_db_gt$CpG %in% cpg_distance_downstream$CpG, ]
+rownames(downstream_cpgs_db_gt) <- NULL
+
+# Add the Db of the genotypes to the bined SNPs for the upstream and the downstream CpGs.
+cpg_upstream_distance_Db <- cpg_distance_upstream %>%
+  left_join(upstream_cpgs_db_gt %>% select(CpG, WT_Heter_alt_Delta_beta, WT_Homo_alt_Delta_beta), by = "CpG")
+cpg_downstream_distance_Db <- cpg_distance_downstream %>%
+  left_join(downstream_cpgs_db_gt %>% select(CpG, WT_Heter_alt_Delta_beta, WT_Homo_alt_Delta_beta), by = "CpG")
+
+# Keep the column with the SNP-CpG distance and the Db between the different SNP genotypes. 
+cpg_upstream_distance_Db_clean <- cpg_upstream_distance_Db %>%
+  select(3, 5, 6) %>% arrange(Distance)
+colnames(cpg_upstream_distance_Db_clean)[1] <- "SNP_CpG_distance"
+cpg_downstream_distance_Db_clean <- cpg_downstream_distance_Db %>%
+  select(3, 5, 6) %>% arrange(Distance)
+colnames(cpg_downstream_distance_Db_clean)[1] <- "SNP_CpG_distance"
+
+# Adjust the dataframes to long format so that they can be plotted.
+cpg_upstream_distance_Db_clean_long <- cpg_upstream_distance_Db_clean %>%
+  pivot_longer(cols = c(WT_Heter_alt_Delta_beta, WT_Homo_alt_Delta_beta), names_to = "Genotype", values_to = "Delta_Beta")
+cpg_downstream_distance_Db_clean_long <- cpg_downstream_distance_Db_clean %>%
+  pivot_longer(cols = c(WT_Heter_alt_Delta_beta, WT_Homo_alt_Delta_beta), names_to = "Genotype", values_to = "Delta_Beta")
+
+# Turn the upstream distances into negative.
+cpg_upstream_distance_Db_clean_long$SNP_CpG_distance <- -cpg_upstream_distance_Db_clean_long$SNP_CpG_distance
+
+# Merge the two dataframes with the upstream and downstream distances and their Dbs into one.
+cpg_distance_Db_clean_long <- rbind(cpg_upstream_distance_Db_clean_long, cpg_downstream_distance_Db_clean_long)
+
+# Set the colorblind friednly colors used for the graph.
+display.brewer.all(colorblindFriendly = TRUE, type = "seq", select = c("Reds", "Greens"))
+greens <- brewer.pal(9, "Greens")
+
+# Plot the heterozygous snp Delta betas.
+cpg_distance_Db_heter_long <- subset(cpg_distance_Db_clean_long, Genotype == "WT_Heter_alt_Delta_beta")
+
+cpg_distance_Db_heter_plot <- ggplot(cpg_distance_Db_heter_long, aes(x = SNP_CpG_distance, y = Delta_Beta)) + geom_point(color = "blue") + ylim(-1, 1) + labs(title = "Comparing methylation levels on neigbouring CpG sites", subtitle = bquote("(WT vs. " * bold(Homozygous) * " alt. in chromosome 22)"), x = "Distance of neigbouring CpG to SNP-CpG (bp)", y = "Difference in methylation levels (Delta beta)")
+
+cpg_distance_Db_heter_long_hex_plot <- ggplot(cpg_distance_Db_heter_long, aes(x = SNP_CpG_distance, y = Delta_Beta)) + geom_hex(bins = 39) + geom_vline(xintercept = 0, linetype = "dashed", size = 0.8, color = "red") + guides(fill = guide_colorbar(barwidth = 0.7)) + ylim(-1, 1) + scale_fill_gradient(low = "#74C476", high = "#00441B")+ labs(title = bquote("WT vs. " * bold(Heterozygous) * " alt. in chromosome 22"), x = "Distance of neigbouring CpG to SNP-CpG (bp)", y = "Difference in methylation levels (Delta beta)")
+
+# Plot the homozygous snp Delta Betas.
+cpg_distance_Db_homo_long <- subset(cpg_distance_Db_clean_long, Genotype == "WT_Homo_alt_Delta_beta")
+
+cpg_distance_Db_homo_long_scatter_plot <- ggplot(cpg_distance_Db_homo_long, aes(x = SNP_CpG_distance, y = Delta_Beta)) + geom_point(color = "orange") + ylim(-1, 1) + labs(title = "Comparing methylation levels on neigbouring CpG sites", subtitle = bquote("(WT vs. " * bold(Heterozygous) * " alt. in chromosome 22)"), x = "Distance of neigbouring CpG to SNP-CpG (bp)", y = "Difference in methylation levels (Delta beta)")
+
+cpg_distance_Db_homo_long_hex_plot <- ggplot(cpg_distance_Db_homo_long, aes(x = SNP_CpG_distance, y = Delta_Beta)) + geom_hex(bins = 40) + geom_vline(xintercept = 0, linetype = "dashed", size = 0.8, color = "red") + guides(fill = guide_colorbar(barwidth = 0.7)) + ylim(-1, 1) + scale_fill_gradient(low = "#74C476", high = "#00441B") + labs(title = bquote("WT vs. " * bold(Homozygous) * " alt. in chromosome 22"), x = "Distance of neigbouring CpG to SNP-CpG (bp)", y = "Difference in methylation levels (Delta beta)")
+
+
+
+  #Everything relevant in a list
+  return(list(all_cpgs_beta = all_cpgs_beta,
+              cpgs_gt_betas = cpgs_gt_betas,
+              cpgs_gt_mean_betas_clean = cpgs_gt_mean_betas_clean,
+              snp_cpgs = snp_cpgs,
+              cpg_distance = cpg_distance,
+              cpgs_Db_wt_homo_gt = cpgs_Db_wt_homo_gt,
+              cpg_upstream_distance_Db_clean_long = cpg_upstream_distance_Db_clean_long,
+              cpg_downstream_distance_Db_clean_long = cpg_downstream_distance_Db_clean_long,
+              cpg_distance_Db_clean_long = cpg_distance_Db_clean_long,
+              cpg_distance_Db_homo_long_hex_plot = cpg_distance_Db_homo_long_hex_plot,
+              cpg_distance_Db_heter_long_hex_plot = cpg_distance_Db_heter_long_hex_plot
+              ))
+}
+```
+
+
+#Save the dataframe with the beta values of all the cpg sites and of the neighboring cpg sites as rds files.
+```{r}
+saveRDS(all_cpgs_beta, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/all_cpgs_beta13.rds")
+```
+
+#Save the list with the beta values and the mean beta values of all the cpg sites as rds files.
+```{r}
+saveRDS(cpgs_gt_betas, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpgs_gt_betas13.rds")
+saveRDS(cpgs_beta, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpgs_beta13.rds")
+saveRDS(cpgs_gt_mean_betas_clean, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpgs_gt_mean_betas_clean13.rds")
+```
+
+#Save the dataframe with the filtered cpg-snps, their distance as csv files.
+```{r}
+write.csv(snp_cpgs, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snp_cpgs13.csv", row.names = FALSE)
+write.csv(cpg_distance, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpg_distance13.csv", row.names = FALSE)
+write.csv(all_cpgs_mean_beta, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/all_cpgs_mean_beta13.csv", row.names = FALSE)
+```
+
+#Save the dataframe with the cpgs homozygous Db. 
+```{r}
+write.csv(cpgs_Db_wt_homo_gt, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpgs_Db_wt_homo_gt13.csv", row.names = FALSE)
+write.csv(cpgs_db_gt, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpgs_db_gt13.csv", row.names = FALSE)
+```
+
+#Save the distance dataframes as csv files.
+```{r}
+write.csv(cpg_upstream_distance_Db_clean_long, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpg_upstream_distance_Db_clean_long13.csv", row.names = FALSE)
+write.csv(cpg_downstream_distance_Db_clean_long, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpg_downstream_distance_Db_clean_long13.csv", row.names = FALSE)
+write.csv(cpg_distance_Db_clean_long, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpg_distance_Db_clean_long13.csv", row.names = FALSE)
+```
+
+#Save the plots.
+```{r}
+ggsave("C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpg_distance_Db_homo_long_hex_plot13.png", cpg_distance_Db_homo_long_hex_plot, width = 6, height = 4.5, dpi = 300)
+ggsave("C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/cpg_distance_Db_heter_long_hex_plot13.png", cpg_distance_Db_heter_long_hex_plot, width = 6, height = 4.5, dpi = 300)
+```
+
+
+

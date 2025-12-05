@@ -1,0 +1,318 @@
+
+---
+title: "Need to split the RNA-seq data into WT/Hetero/Homo"
+author: "Daniel Beisly"
+date: "8-1-2025"
+output: html_document
+#Processing the RNA-seq data
+---
+
+
+#I need the dataframe with all the genotypes in it. Where each sample and each SNP has its genotype listed. 
+#We need allele_gt_df
+#Current plan to use allele_gt_df and determine which genotypes are hetero, homo and WT. 
+#We need WT alleles to find, but they won't be changed in delta beta at least not according to previously generated data.
+#Do we just pick a WT SNP-CpG and determine which genes it belongs to?
+#We can also not filter and use all homozygous locations and all heterozygous locations regardless of methylation, but we want to determine impact of methylation. 
+  
+  
+```{r}
+#Libraries
+library(dplyr)
+library(AnnotationHub)
+library(annotatr)
+```
+
+```{r}
+# Define the variable for the chromosome number
+chromosome_number <- 21
+
+# Construct the file path dynamically
+file_path <- paste0("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/Chr", 
+                    chromosome_number, 
+                    "/allele_gt_df", 
+                    chromosome_number, 
+                    ".csv")
+
+#allele_gt_df has all the genotypes and the SNP-positon which we can link to a gene. 
+allele_gt_df <- read.csv(file_path)
+
+#qc_filtered_gt has the reference alleles 
+#We only need ref/alt from this
+file_path <- paste0("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/Chr", 
+                    chromosome_number, 
+                    "/qc_filtered_gt", 
+                    chromosome_number, 
+                    ".csv")
+
+qc_filtered_gt <- read.csv(file_path)
+
+#filtered_snps are snps which have been filtered
+file_path <- paste0("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/Chr", 
+                    chromosome_number, 
+                    "/filtered_snps", 
+                    chromosome_number, 
+                    ".csv")
+
+filtered_snps <- read.csv(file_path)
+
+
+#Now we add qc_filtered_gt$Ref_Alt to allele_gt_df
+allele_gt_df$Ref_Alt <- qc_filtered_gt$Ref_Alt
+# Move Ref_Alt to the front
+allele_gt_df <- allele_gt_df[, c("Ref_Alt", setdiff(colnames(allele_gt_df), "Ref_Alt"))]
+rm(qc_filtered_gt)
+
+#We should filter for filtered_snps instead of cutting allele_gt_df to it's top10
+#Filter rows in allele_gt_df where allele_gt_df$POS is in filtered_snps$POS
+allele_gt_df <- allele_gt_df[allele_gt_df$POS %in% filtered_snps$POS, ]
+
+# Create copies of the original dataframe for each classification
+wildtype_df <- allele_gt_df
+homozygous_df <- allele_gt_df
+heterozygous_df <- allele_gt_df
+
+# Loop through each row of the dataframe
+for (i in 1:nrow(allele_gt_df)) {
+  
+  # Get the value in allele_gt_df$Ref_Alt for the current row (split into two alleles)
+  ref_alt_split <- strsplit(as.character(allele_gt_df$Ref_Alt[i]), "/")[[1]]
+  first_allele <- ref_alt_split[1]
+  second_allele <- ref_alt_split[2]
+  
+  # Loop through each column in the dataframe
+  for (col_name in colnames(allele_gt_df)) {
+    
+    # Check if the column name starts with "CZC"
+    if (startsWith(col_name, "CZC")) {
+      
+      # Get the value in the current cell of the column
+      cell_value <- allele_gt_df[i, col_name]
+      
+      # Split the cell_value (should be two alleles)
+      cell_split <- strsplit(as.character(cell_value), "/")[[1]]
+      
+      # Only proceed if cell has two alleles
+      if (length(cell_split) == 2) {
+        # Wildtype: Both letters are the first allele
+        if (cell_split[1] == first_allele && cell_split[2] == first_allele) {
+          # Keep it in wildtype_df, remove it from others
+          homozygous_df[i, col_name] <- NA
+          heterozygous_df[i, col_name] <- NA
+        }
+        # Homozygous: Both letters are the second allele
+        else if (cell_split[1] == second_allele && cell_split[2] == second_allele) {
+          # Keep it in homozygous_df, remove it from others
+          wildtype_df[i, col_name] <- NA
+          heterozygous_df[i, col_name] <- NA
+        }
+        # Heterozygous: Otherwise, it's heterozygous
+        else {
+          # Keep it in heterozygous_df, remove it from others
+          wildtype_df[i, col_name] <- NA
+          homozygous_df[i, col_name] <- NA
+        }
+      }
+    }
+  }
+}
+
+# Now you have 3 dataframes: wildtype_df, homozygous_df, and heterozygous_df
+# Each dataframe will contain the rows with matching values, and the rest will have NA where the values don't match the criteria
+#From here it is easy. 
+#We generate a new DF, one with a column containing
+WT_samples_SNPs <- data.frame(POS = character(), Sample = character(), stringsAsFactors = FALSE)
+
+# Loop through each row in wildtype_df
+for (i in 1:nrow(wildtype_df)) {
+  # Get the current POS value
+  current_pos <- wildtype_df$POS[i]
+  
+  # Find the column names where the row has a value (not NA), excluding POS and Ref_Alt columns
+  present_columns <- colnames(wildtype_df)[
+    !is.na(wildtype_df[i, ]) & !(colnames(wildtype_df) %in% c("POS", "Ref_Alt"))
+  ]
+  
+  # Combine the results into the result dataframe
+  if (length(present_columns) > 0) {
+    WT_samples_SNPs <- rbind(WT_samples_SNPs, data.frame(POS = current_pos, Sample = paste(present_columns, collapse = ", "), stringsAsFactors = FALSE))
+  }
+}
+
+#Remove wildtype_df to save some storage
+rm(wildtype_df)
+
+#Same for Homozygous
+Homo_samples_SNPs <- data.frame(POS = character(), Sample = character(), stringsAsFactors = FALSE)
+
+# Loop through each row in homozygous_df
+for (i in 1:nrow(homozygous_df)) {
+  # Get the current POS value
+  current_pos <- homozygous_df$POS[i]
+  
+  # Find the column names where the row has a value (not NA), excluding POS and Ref_Alt columns
+  present_columns <- colnames(homozygous_df)[
+    !is.na(homozygous_df[i, ]) & !(colnames(homozygous_df) %in% c("POS", "Ref_Alt"))
+  ]
+  
+  # Combine the results into the result dataframe
+  if (length(present_columns) > 0) {
+    Homo_samples_SNPs <- rbind(Homo_samples_SNPs, data.frame(POS = current_pos, Sample = paste(present_columns, collapse = ", "), stringsAsFactors = FALSE))
+  }
+}
+
+#remove homozygous_df for some memory storage
+rm(homozygous_df)
+
+#Same again for heterozygous
+Hetero_samples_SNPs <- data.frame(POS = character(), Sample = character(), stringsAsFactors = FALSE)
+
+# Loop through each row in heterozygous_df
+for (i in 1:nrow(heterozygous_df)) {
+  # Get the current POS value
+  current_pos <- heterozygous_df$POS[i]
+  
+  # Find the column names where the row has a value (not NA), excluding POS and Ref_Alt columns
+  present_columns <- colnames(heterozygous_df)[
+    !is.na(heterozygous_df[i, ]) & !(colnames(heterozygous_df) %in% c("POS", "Ref_Alt"))
+  ]
+  
+  # Combine the results into the result dataframe
+  if (length(present_columns) > 0) {
+    Hetero_samples_SNPs <- rbind(Hetero_samples_SNPs, data.frame(POS = current_pos, Sample = paste(present_columns, collapse = ", "), stringsAsFactors = FALSE))
+  }
+}
+
+#remove heterozygous_df for some extra storage
+rm(heterozygous_df)
+
+#SNP-CpGs are linked to genotype.
+#Now link the SNP position to a gene.
+#First create a dataframe with "chrom", "start", "end"
+SNP_CpG_pos <- data.frame(
+  chrom = paste0("chr", chromosome_number), # Generate chrom column as "chr" + chromosome number
+  start = allele_gt_df$POS,               # Use POS as the start position
+  end = allele_gt_df$POS + 1,
+  stringsAsFactors = FALSE                # Prevent automatic conversion to factors
+)
+
+#All the different types of regions and genes and stuff from the annotatr package. 
+annotations <- build_annotations(
+  genome = 'hg19',
+  annotations = c(
+    'hg19_basicgenes',         # Basic gene annotations (promoters, exons, introns, etc.)
+    'hg19_cpg_islands',        # CpG islands
+    'hg19_cpg_shores',         # CpG shores (2kb upstream/downstream of CpG islands)
+    'hg19_cpg_shelves',        # CpG shelves (2-4kb away from CpG islands)
+    'hg19_enhancers_fantom',   # Enhancers based on FANTOM5 data
+    'hg19_genes_5UTRs',        # 5' UTRs of genes
+    'hg19_genes_3UTRs',        # 3' UTRs of genes
+    'hg19_genes_exons',        # Exons of genes
+    'hg19_genes_introns',      # Introns of genes
+    'hg19_genes_intergenic'    # Intergenic regions
+  )
+)
+
+# Convert SNP dataframe to GRanges object
+snp_gr <- GRanges(
+  seqnames = SNP_CpG_pos$chrom,
+  ranges = IRanges(start = SNP_CpG_pos$start, end = SNP_CpG_pos$start)
+)
+
+# Annotate SNP regions
+annotated_snps <- annotate_regions(
+  regions = snp_gr,
+  annotations = annotations,
+  ignore.strand = TRUE
+)
+
+annotated_snps <- as.data.frame(annotated_snps)
+# Update column names: remove "annot." prefix
+colnames(annotated_snps) <- gsub("^annot\\.", "", colnames(annotated_snps))
+# If there are duplicate column names, make them unique
+colnames(annotated_snps) <- make.names(colnames(annotated_snps), unique = TRUE)
+
+annotated_snps <- annotated_snps %>%
+  filter(!is.na(symbol))
+
+# Create a new dataframe with selected columns
+annotated_snps_types <- annotated_snps[, c("start", "symbol", "type")]
+
+```
+
+#Need to save; Hetero_Samples_SNPs, Homo_samples_SNPs, WT_samples_SNPs and annotated_snps_types
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("Hetero_samples_SNPs_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(Hetero_samples_SNPs, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+
+#Need to save; Homo_samples_SNPs, WT_samples_SNPs and annotated_snps_types
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("Homo_samples_SNPs_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(Homo_samples_SNPs, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#Need to save; WT_samples_SNPs and annotated_snps_types
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("WT_samples_SNPs_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(WT_samples_SNPs, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#Need to save; annotated_snps_types
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("annotated_snps_types_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(annotated_snps_types, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```

@@ -1,0 +1,179 @@
+---
+title: 'Linear mixed models'
+author:
+  - Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+params:
+  chunk: Z:/data/iPSC_data/iPSC_MAE/h5MAE
+---
+
+## Params
+
+```{r read_multiassayexperiment}
+print(params)
+```
+
+
+## Read chunk csv file to dataframe
+```{r}
+chunk_df <- read.csv(params$chunk, row.names=1)
+``` 
+
+## Chunk Name
+```{r}
+chunk_name <- paste0(params$chunk)
+chunk_name <- gsub(".csv", "", chunk_name)
+```
+
+## Libraries
+```{r}
+require(MASS)
+require(sfsmisc)
+```
+
+
+## Function for RLM 
+```{r}
+#' Apply robust linear modeling to one assay and multiple outcome variables
+#'
+#' @param se A SummarizedExperiment from experiments(MultiAssayExperiment).
+#' @param outcomes A character vector with column names present in colData(MultiAssayExperiment).
+#' @param covariates A character vector with column names present in colData(MultiAssayExperiment).
+#' @returns A data frame.
+#' @examples
+#' run_rlm_se(se, outcomes = c("Age", "BMI"), covariates = c("Sex"))
+run_rlm_se <- function(df, outcomes, covariates = NULL) {
+  
+  ## Make characters factors
+  df[] <- lapply(df, function(x) if (is.character(x)) as.factor(x) else x)
+  
+  features <- colnames(df)
+  features <- setdiff(unlist(features), unlist(outcomes))
+  #' Apply robust linear modeling to one feature and one outcome variable
+  #'
+  #' @param feature A molecule identifier present in rowData(SummarizedExperiment).
+  #' @param df A data frame containing assay data and biological variables.
+  #' @param outcome A character string indicating biological variable column name.
+  #' @param covariates A character string indicating covariate column name.
+  #' @returns A data frame.
+  #' @examples
+  #' run_rlm_df("hmdb:HMDB0000062", df, outcome = "Age", covariates = c("Sex"))
+  run_rlm_df <- function(feature, df, outcome, covariates = NULL) {
+    # run rlm for one feature and one outcome
+    df$y <- df[[feature]]
+    # define formula
+    covar_term <- ""
+    if (!is.null(covariates)) {
+      covar_term <- paste0(" + ", paste0(covariates, collapse = " + "))}
+    str_formula <- paste0("y ~ ", outcome, covar_term)
+    my_formula <- as.formula(str_formula)
+    # fit robust regression model
+    rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+    if (length(rlm_fit) < 2) {
+      message("MASS::rlm error: ", feature, ", ", str_formula)
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = NA, 
+        std.error = NA,
+        t.value = NA,
+        p.value = NA)
+    } else {
+      # robust F-test - Wald test for multiple coefficients of rlm object
+      f_test <- f.robftest(rlm_fit, var = 2) # 1=intercept, 3:=covariates
+      # results
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = summary(rlm_fit)$coefficients[2, "Value"], 
+        std.error = summary(rlm_fit)$coefficients[2, "Std. Error"],
+        t.value = summary(rlm_fit)$coefficients[2, "t value"],
+        p.value = f_test$p.value)
+    }
+  }
+  
+  names(outcomes) <- outcomes
+  
+  rlm_results <- do.call(rbind, lapply(outcomes, function(outcome) {
+    tmp_df <- df
+    if (length(outcome) > 50) {
+          outcome = "All"
+        }
+    else {
+        outcome = outcome
+    }
+    # remove missing values categories
+    if (outcome == "Smoking.Status") {
+      tmp_df <- tmp_df[tmp_df$Smoking.Status != "Unknown If Ever Smoked", ]
+      tmp_df$Smoking.Status <- droplevels(tmp_df$Smoking.Status)
+    }
+   
+    rlm_result_ <- do.call(rbind, lapply(
+      features,
+      run_rlm_df,
+      df = tmp_df, outcome = outcome, covariates = covariates))
+    # adjust p-values
+    rlm_result_$p.adj <- p.adjust(rlm_result_$p.value, method = "BH")
+    rlm_result_$rank <- rank(rlm_result_$p.value)
+    rlm_result_
+  }))
+  rlm_results
+}
+
+
+# outcome variables
+outcomes <- c(
+  "Sex", "Age", "Age.group", 
+  "Height", "Weight", "BMI", "BMI.group", 
+  "Smoking.Status", "ABO.Blood.Group", "Rh.Blood.Group", 
+  "Leukocytes", "Erythrocytes", "Hemoglobin", "Hematocrit", "Platelets", "MCV", 
+  "MCH", "MCHC", "Lymphocytes", "MXD", "Neutrophils",
+  "Age_pred_BLUP", "Age_acc_BLUP",   "Age_pred_Levine", "Age_acc_Levine")
+```
+
+
+## Run robust linear model per outcome, per feature
+```{r}
+# fit robust linear models using different formulas
+mae_rlm_woCovariate <- run_rlm_se(chunk_df,  
+                                  outcomes = outcomes)
+mae_rlm_woCovariate$dataset <- 'all'
+
+
+mae_rlm_wCovarSex <- run_rlm_se(chunk_df,  
+                                outcomes = outcomes[outcomes != "Sex"],
+                                covariates = c("Sex"))
+mae_rlm_wCovarSex$dataset <- 'all'
+
+
+mae_rlm_woCovariate_m <- run_rlm_se(chunk_df[chunk_df$Sex == "MALE",],  
+                                    outcomes = outcomes[-which(outcomes %in% c("Sex"))])
+mae_rlm_woCovariate_m$dataset <- 'male'
+
+
+mae_rlm_woCovariate_f <- run_rlm_se(chunk_df[chunk_df$Sex == "FEMALE",],  
+                                    outcomes = outcomes[-which(outcomes %in% c("Sex"))])
+mae_rlm_woCovariate_f$dataset <- 'female'
+
+
+# merge all rlm results into one list
+mae_rlm_all <- rbind(mae_rlm_woCovariate, 
+                     mae_rlm_wCovarSex,
+                     mae_rlm_woCovariate_m,
+                     mae_rlm_woCovariate_f)
+```
+
+
+## Write to CSV
+```{r}
+write.csv(mae_rlm_all, file = paste0('RLM_Model_', chunk_name, '.csv'))
+```
+
+

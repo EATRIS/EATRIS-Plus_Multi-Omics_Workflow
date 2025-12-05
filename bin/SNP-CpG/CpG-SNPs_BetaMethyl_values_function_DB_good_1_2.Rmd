@@ -1,0 +1,129 @@
+---
+  title: "Script to process the methylome"
+author: "Daniel"
+date: "12/11/2024"
+### We want to early on remove/filter unneccessary columns and merge only those necessesary
+### This function generates the methylome snps.
+### The files are called meth_snps & meth_no_snps
+---
+  
+#Libraries
+```{r}
+library(methrix)
+library(GenomicScores)
+library(MafDb.1Kgenomes.phase3.GRCh38)
+library(vcfR)
+library(GenomicRanges)
+library(dplyr)
+library(data.table)
+```
+
+```{r}
+read_snps_methylome <- function(chromosome) {
+  #VCF = variant call format, stores things such as SNPs
+  #Files
+  dir <- "Z:/omics/EM-seq_UU/h5_QC_filtered"
+  meth <- load_HDF5_methrix(dir)
+  
+  #vcf_chr for chr22 is correct
+  vcf_chr_path <- paste("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome, "/merged_vcfs_chr", chromosome, ".vcf", sep = "")
+vcf_chr <- read.vcfR(vcf_chr_path)
+  
+  ref_cpgs_chr <- read.table(paste("Z:/omics/Methylation/Daniel_files/ref_cpgs_chr", chromosome, ".bed", sep = ""), header = FALSE, col.names = c("chrom", "start", "end"))
+  
+  #Get the beta values of the overlapping SNPs to CpG sites in chromosome 22.
+
+meth_snps_filtered <- remove_snps(meth, keep = TRUE)
+meth_all <- subset_methrix(meth, contigs = chromosome)
+meth_no_snps <- subset_methrix(meth_snps_filtered$snp_filtered, contigs = chromosome)
+meth_snps <- subset_methrix(meth_snps_filtered$removed_snps, contigs = chromosome)
+beta_NA <- get_matrix(meth_snps, type = 'M', add_loci =  TRUE)
+
+#Keep the CpG-SNPs that have a beta value in at least 20% of the samples. 
+beta <- beta_NA[(rowMeans(is.na(beta_NA))) <= 0.2, ]
+
+
+
+#Filter for the SNPs from the variant call file (VCF) and extract them in a separate data frame.
+vcf_info <- vcf_chr@fix[, (c("CHROM", "POS", "REF", "ALT", "INFO"))]
+vcf_info <- as.data.frame(vcf_info)
+snps <- vcf_info[(grep("SNV", vcf_info$INFO)), ]
+snps$POS <- as.numeric(snps$POS)
+
+#Turn the data frame with the reference CpG sites on chromosome 22 and the data frame with the SNPs on chromosome 22 into Granges objects.
+ref_cpgs_chr_gr <- GRanges(seqnames = ref_cpgs_chr$chrom, ranges = IRanges(start = ref_cpgs_chr$start, end = ref_cpgs_chr$end))
+snps_gr <- GRanges(seqnames = snps$CHROM, ranges = IRanges(start = snps$POS, end = snps$POS))
+
+#Find the overlapping SNPs to CpGs between the two Grange objects. 
+overlaps <- subjectHits(findOverlaps(ref_cpgs_chr_gr, snps_gr))
+overlaps_info <- start(snps_gr)[overlaps]
+SNP_CpGs <- data.table(overlaps_info)
+SNP_CpGs_info <- snps[snps$POS %in% SNP_CpGs$overlaps_info, ]
+
+
+
+
+
+#Total SNPs that overlap with CpGs and have a methylation status before filtering: 64.067
+#Total SNPs that overlap with CpGs and have SNP information in the vcf file: 52.694
+#Find the overlaps of SNP-CpG methylated sites and the SNPs-CpGs from the vcf file.
+
+#SNPs that overlap on the C base of the CpG sites: 15.220
+beta <- as.data.frame(beta)
+SNP_CpGs_info$POS <- as.numeric(SNP_CpGs_info$POS)
+rownames(SNP_CpGs_info) <- SNP_CpGs_info$POS
+rownames(beta) <- beta$start
+merged_beta_snps_start <- merge(SNP_CpGs_info, beta, by = "row.names", all = FALSE)
+merged_beta_snps_start <- merged_beta_snps_start[,-(c(1,7,8))]
+
+#SNPs that overlap on the G base of the CpG sites: 15.438
+beta$end <- beta$start + 1
+beta_end <- beta %>% relocate (end, .after = start) 
+beta <- beta %>% select(-"end")
+SNP_CpGs_info$POS <- as.numeric(SNP_CpGs_info$POS)
+rownames(SNP_CpGs_info) <- SNP_CpGs_info$POS
+rownames(beta_end) <- beta_end$end
+merged_beta_snps_end <- merge(SNP_CpGs_info, beta_end, by = "row.names", all = FALSE)
+merged_beta_snps_end <- merged_beta_snps_end %>% select(-"start")
+merged_beta_snps_end <- merged_beta_snps_end[,-(c(1,7,8))]
+
+#Combine the two dataframes for the SNPs that overlap on both bases of the CpG sites: 30.756
+snps_meth <- rbind(merged_beta_snps_start, merged_beta_snps_end)
+
+vcf_pos <- vcf_chr@fix[, ("POS")]
+filtered_vcf_snps <- vcf_chr[vcf_pos %in% snps_meth$POS,]
+
+  
+  #Everything relevant in a list
+  return(list(filtered_vcf_snps = filtered_vcf_snps,
+              meth_no_snps = meth_no_snps,
+              meth_snps = meth_snps,
+              snps_meth = snps_meth))
+}
+```
+
+### snps_meth is the start and end positions of SNP positions. These methylated positions have been filtered for being present 
+### in more than 20% of the samples. 
+### Example: snps_chr22 <- chr22$snps_meth
+#Save the meCpGs-SNPs that matched the vcf file, as a csv file.
+
+```{r}
+write.csv(snps_meth, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snps_meth_chr22.csv", row.names = FALSE)
+```
+
+#Save only the meCpGs-SNPs from the vcf file for the chromosome, in another vcf file.
+#filtered_vcf_snps is the meCpGs-SNPs positions for the chromosome (not from the sample)
+#Example: filtered_vcf_snps18 <- chr18$filtered_vcf_snps
+# It has lost sample names
+```{r}
+write.vcf(filtered_vcf_snps, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snps_nomethsample_chr22.vcf")
+```
+
+#Save the methrix objects with the snp overlaps and non overlaps.
+#Example: meth14_no_snps <- chr14$meth_no_snps
+#Eample: meth14_snps <- chr14$meth_snps
+```{r}
+meth_no_snps <- save_HDF5_methrix(meth_no_snps, dir = ("C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/meth22_no_snps"), replace = TRUE)
+meth_snps <- save_HDF5_methrix(meth_snps, dir = ("C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/meth22_snps/"), replace = TRUE)
+```
+

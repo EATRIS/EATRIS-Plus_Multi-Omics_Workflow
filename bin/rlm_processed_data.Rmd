@@ -420,7 +420,7 @@ df <- mae_rlm_all_merged %>%
 ```{r}
 signif_hits <- mae_rlm_all_merged[mae_rlm_all_merged$p.adj < 0.05,]
 # Save dataframe with significant hits
-write.csv(signif_hits, "signif_hits.csv")
+write.csv(signif_hits, "rlm_signif_hits.csv")
 ``` 
 
 

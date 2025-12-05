@@ -2,14 +2,9 @@
 title: "Analyze the effect of cell-types on mRNA-seq contributions to the MOFA factors"
 output: html_document
 params:
-  b_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_B-cells_Lineage.tsv"
-  den_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_Dendritic.tsv"
-  gra_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_Granulocytes_Lineage.tsv"
-  mon_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_Monocytes_Lineage.tsv"
-  nk_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_NK-cells_Lineage.tsv"
-  t_cells: "Z:/omics/mRNAseq_FIMM/Protein_Atlas_Celltypes/blood_cell_lineage_category_rna_T-cells_Lineage.tsv"
-  
-  mrna_data: "Output/MOFA/MOFA_RNAseq.xlsx"
+  Atlas_data: NULL
+  mrna_weights: NULL
+  mae_hdf5_dir_path: NULL
 ---
 
 ## Libraries
@@ -18,16 +13,36 @@ library(ggplot2)
 ```
 
 
-### Params
+### Reference expression levels derived from the Protein Atlas (https://www.proteinatlas.org/humanproteome/single+cell/single+cell+type)
 ```{r}
-print(params)
+b_cells <- "blood_cell_lineage_category_rna_B-cells_Lineage.tsv"
+den_cells <- "blood_cell_lineage_category_rna_Dendritic.tsv"
+gra_cells <-  "blood_cell_lineage_category_rna_Granulocytes_Lineage.tsv"
+mon_cells <- "blood_cell_lineage_category_rna_Monocytes_Lineage.tsv"
+nk_cells <-  "blood_cell_lineage_category_rna_NK-cells_Lineage.tsv"
+ t_cells <-  "blood_cell_lineage_category_rna_T-cells_Lineage.tsv"
 ```
+
+
+
+## Read input data 
+Input data is a MultiAssayExperiment (MAE) object. 
+```{r}
+library(MultiAssayExperiment)
+library(HDF5Array)
+
+mae <- loadHDF5MultiAssayExperiment(dir = params$mae_hdf5_dir_path, 
+                                     prefix = 'mae')
+```
+
 
 
 ## Read mRNA-seq MOFA factor weights
 ```{r}
-mrna_weights <- read.csv('Output/MOFA/factorweights_mRNA-seq-2___batch-adjusted___vst___corrected.csv', row.names=1)
-mrna_mapping <- readxl::read_xlsx('Output/MOFA/MOFA_RNAseq.xlsx')
+#mrna_weights <- read.csv('Output/MOFA/factorweights_mRNA-seq-2___batch-adjusted___vst___corrected.csv', row.names=1)
+mrna_weights <- read.csv(params$mrna_weights, row.names=1)
+#mrna_mapping <- readxl::read_xlsx('Output/MOFA/MOFA_RNAseq.xlsx')
+mrna_mapping <- as.data.frame(rowData(mae[['mRNA-seq-2 | batch-adjusted | corrected']]))
 
 head(mrna_weights[1:5,1:5])
 
@@ -158,7 +173,13 @@ plot_rankings_grid(NK_cells, 'NK')
 
 ### List of Ribosomal protein genes
 ```{r}
-ribo_list <- c("RPS17", "RPL17", "RPS10", "RPL36A", "RPS9", "RPL26", "RPL30", "RPS15A", "RPS25", "RPS29", "RPL34", "RPL41", "RPL24", "RPS7", "RPL27", "UBA52", "RPL21", "RPS13", "RPL27A", "RPS20", "RPS11", "RPL37", "RPL15", "RPL9", "RPL18", "RPS16", "RPL39", "RPS24", "RPL38", "RPL37A", "RPS28", "RPL7", "RPL8", "RPS3", "RPL35A", "RPL12", "RPL11", "RPS27", "RPLP2", "RPL10", "RPL18A", "RPS2", "RPL14", "RPL23A", "RPL35", "RPSA", "RPL13", "RPS6", "RPLP1", "RPL32", "RPL36", "RPS12", "RACK1", "RPS18", "RPS14", "RPL19", "RPL3", "RPS26", "RPS23", "RPL10A", "RPL28", "RPL5", "RPL4", "RPL7A", "RPS15", "RPS21", "RPL31", "RPL6", "RPLP0", "RPL23", "RPL13A", "RPL29", "RPS8") 
+ribo_list <- c("RPS17", "RPL17", "RPS10", "RPL36A", "RPS9", "RPL26", "RPL30", "RPS15A", "RPS25", "RPS29", "RPL34", 
+                "RPL41", "RPL24", "RPS7", "RPL27", "UBA52", "RPL21", "RPS13", "RPL27A", "RPS20", "RPS11", "RPL37", 
+                "RPL15", "RPL9", "RPL18", "RPS16", "RPL39", "RPS24", "RPL38", "RPL37A", "RPS28", "RPL7", "RPL8", 
+                "RPS3", "RPL35A", "RPL12", "RPL11", "RPS27", "RPLP2", "RPL10", "RPL18A", "RPS2", "RPL14", "RPL23A", 
+                "RPL35", "RPSA", "RPL13", "RPS6", "RPLP1", "RPL32", "RPL36", "RPS12", "RACK1", "RPS18", "RPS14", 
+                "RPL19", "RPL3", "RPS26", "RPS23", "RPL10A", "RPL28", "RPL5", "RPL4", "RPL7A", "RPS15", "RPS21", 
+                "RPL31", "RPL6", "RPLP0", "RPL23", "RPL13A", "RPL29", "RPS8") 
 
 Ensembl_ids <- lapply(ribo_list, function(x) {
   ensembl_id <- mrna_mapping[mrna_mapping$Gene_symbol == x, "X"]

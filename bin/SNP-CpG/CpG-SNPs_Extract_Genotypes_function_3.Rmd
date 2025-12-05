@@ -1,0 +1,526 @@
+---
+title: "Extract Genotypes function"
+author: "Daniel"
+date: "10/1/2024"
+---
+### Test set for chromosome ###
+
+```{r}
+#Libraries
+library(vcfR)
+library(dplyr)
+library(tidyr)
+library(wtest)
+library(gtools)
+library(ggplot2)
+library(HardyWeinberg)
+```
+
+
+#Run the function as follows: Chr22_pheno <- Phenotype_chromosome_data(22)
+#Function to load chromosome_data
+```{r}
+Phenotype_chromosome_data <- function(chromosome_number) {
+#the file paths of the chromosome
+#snps_nomethsample are the SNP positions which also have some level of methylation measured in the sample methylome
+snps_nomethsample_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number , "/snps_nomethsample_chr", chromosome_number, ".vcf")
+snps_meth_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number, "/snps_meth_chr", chromosome_number, ".csv")
+
+#load the VCF and CSV files for the chromosome
+#changd snps_nomethsample_file to
+#snps_nomethsample_file is the overlapping locations of CpG sites and SNP sites
+#snps_meth is the locations of CpG sites with measured methylation in samples
+#Snps_nomethsample_file is messed up. It is the problem and does not contain the right alleles for samples
+#vcfr file does not contain the column names for genotype when loaded after saved
+#Continue here straight from the betamethyl values function
+snps_nomethsample_file <- read.vcfR(snps_nomethsample_file_path)
+snps_meth <- read.csv(snps_meth_path)
+
+#snps_nomethsample_file <- filtered_vcf_snps
+
+#Load the samples (don't know if this is different per chromosome. If it isn't, it doesn't need to change)
+samples_ids <- read.csv("Z:/omics/Methylation/Daniel_files/filtered_samples.csv")
+
+#We immediately remove the samples which did not pass quality control isntead of keeping them.
+columns_to_keep <- colnames(snps_meth) %in% samples_ids$Samples
+non_sample_columns <- 1:8
+snps_meth <- snps_meth[, c(non_sample_columns, which(columns_to_keep))]
+
+#Replace missing genotype data with "0/0" in the VCF object
+snps_nomethsample_file@gt[snps_nomethsample_file@gt == "./.:.:.:.:.:.:.:.:.:.:.:.:.:."] <- "0/0"
+
+#extract genotype and convert to dataframe
+#"genotypes" also has no sample IDs in column. Turns out the snps_nomethsample_file already doesn't have sample IDs in its columns.
+#"snps_nomethsample_file" sample IDs are lost when loading them here, but are present in the first script "CpG-SNP_Beta_values"
+#Sample names here are present in chromosome 22
+#Sample names here are lost or better, not even present in chromosome 21 as it is not modified here.
+genotypes <- extract.gt(snps_nomethsample_file)
+genotypes <- as.data.frame(genotypes)
+
+
+#The snpsnomethsample file is messed up as the allele 0/1 already don't match.
+#add the "POS" column and process the row names
+genotypes$POS <- rownames(genotypes)
+split_POS <- strsplit(as.character(genotypes$POS), "_")
+genotypes$POS <- sapply(split_POS, function(x) x[2])
+genotypes$POS <- as.numeric(genotypes$POS)
+rownames(genotypes) <- NULL
+
+#Relocate the "POS" column infront of the sample columns
+genotypes <- genotypes[, c("POS", setdiff(names(genotypes), "POS"))]
+
+
+
+#Extract the genotype and fix columns from the VCF file and merge them
+snps_nomethsample_file_gt_columns <- snps_nomethsample_file@gt
+snps_nomethsample_file_fix_columns <- snps_nomethsample_file@fix
+merged_fix_gt <- cbind(snps_nomethsample_file_fix_columns, snps_nomethsample_file_gt_columns)
+merged_fix_gt <- as.data.frame(merged_fix_gt)
+
+
+#Identify and filter variants based on duplicated positions
+variants <- genotypes$POS[duplicated(genotypes$POS) | duplicated(genotypes$POS, fromLast =TRUE)]
+variants_info <- genotypes[genotypes$POS %in% variants, ]
+variants_matching <- merged_fix_gt[merged_fix_gt$POS %in% variants_info$POS, ]
+
+variants_matching$Numbers <- rownames(variants_matching)
+variants_matching <- variants_matching %>% relocate (Numbers, .before = CHROM)
+rownames(variants_matching) <- NULL
+
+#Looks ok?
+#filter SNVs from the matching variants
+#snps_gt1 and variants_matching both lack sample ID column names.
+snps_gt1 <- variants_matching[(grep("SNV", variants_matching$INFO)), ]
+snps_gt1$Numbers <- as.numeric(snps_gt1$Numbers)
+
+
+
+#identify non matching variants
+#This is different
+variants_non_matching <- variants_matching$Numbers[!(variants_matching$Numbers %in% snps_gt1$Numbers)]
+
+#Add "Numbers"column to the genotypes data and relocate to before "POS"
+genotypes$Numbers <- rownames(genotypes)
+genotypes <- genotypes %>% relocate (Numbers, .before = POS)
+
+### This is correct as variants_matching shows positions and are correctly removed from genotype data so the mistake happens downstream of this
+
+
+#snps_gt is wrong as the step after makes a mistake with the replacing of alleles
+#qc_filtered is generated from here and shows the error
+#Filter out the non-matchning variants from the genotype data
+snps_gt <- genotypes[!(genotypes$Numbers %in% variants_non_matching), ]
+snps_gt <- snps_gt %>% select(-"Numbers")
+
+
+
+
+#Replace all the genotypes with: 
+#Homozygous for the reference allele: 0
+#Heterozygous: 1
+#Homozygous for the alternative allele: 2
+#Process genotype replacements
+snps_genotypes <- snps_gt
+
+### This goes wrong in some instances of position and sample name?????
+#Check this
+#Replace the genotype according to the condition
+snps_genotypes <- replace(snps_genotypes, snps_genotypes == "0/0", "0")
+snps_genotypes <- replace(snps_genotypes, snps_genotypes == "0/1" | snps_genotypes == "0/2" | snps_genotypes == "0/3", "1")
+snps_genotypes <- replace(snps_genotypes, snps_genotypes == "1/1" | snps_genotypes == "1/2" | snps_genotypes == "1/3" | snps_genotypes == "2/1" | snps_genotypes == "2/2" | snps_genotypes == "2/3" | snps_genotypes == "3/1" | snps_genotypes == "3/2" | snps_genotypes == "3/3", "2")
+
+#Transpose the genotype data
+snps_genotypes_t <- t(snps_genotypes)
+
+#Set column names to the first row and remove the first row
+colnames(snps_genotypes_t) <- as.character(snps_genotypes_t[1,])
+snps_genotypes_t <- snps_genotypes_t[-1,]
+
+#Convert to df and ensure columns are numeric
+snps_genotypes_t <- as.data.frame(snps_genotypes_t)
+snps_genotypes_t <- mutate_all(snps_genotypes_t, as.numeric)
+
+
+### Up to here our code does exactly the same as the original
+### Double checked, it's all goood
+
+#Why are we resetting the row names here????
+#I guess we do have the genotype/allele combination related to the position
+#Reset the row names
+rownames(snps_genotypes_t) <- NULL
+
+
+#Calculate the MAFs.
+#Minor Allele Frequency (MAF) is a measure of how often the less common allele of a genetic variant appears in a given #population. It provides a metric for understanding genetic variation.
+snps_genotypes_maf <- wtest::maf(snps_genotypes_t, which.snp= NULL)
+snps_genotypes_maf_df <- as.data.frame(snps_genotypes_maf)
+#Make all the MAFs with 1 decimal. 
+snps_genotypes_maf_df$snps_genotypes_maf <- round(snps_genotypes_maf_df$snps_genotypes_maf, 1)
+
+###Seems good to here 27/11/2024
+
+#Plot all the MAFs.
+snps_all_maf <- nrow(snps_genotypes_maf_df)
+maf_all_plot_title <- paste0("MAF of ", snps_all_maf, " meCpG-SNPs")
+maf_plot <- ggplot(data = snps_genotypes_maf_df, aes(x = snps_genotypes_maf)) + geom_histogram(aes(fill = cut), color = "black", linewidth = 1, fill= "white", binwidth = 0.1) + stat_bin(binwidth = 0.1, geom = "text", colour = "black", vjust = -0.5, size = 3.5, aes(label = after_stat(count))) + scale_x_continuous(breaks = seq(0, 1, by = 0.1)) + theme_grey() + geom_vline(aes(xintercept = 0.15), color = "blue", linetype = "dashed", linewidth = 1) + geom_vline(aes(xintercept = 0.85), color = "blue", linetype = "dashed", linewidth = 1) + labs(title = maf_all_plot_title, x = "MAF", y = "Count")
+
+
+#Why is the "POS" column set to the rownames? and not the other way around
+#Keep the SNPs of the samples with 0.2 <= MAF <= 0.8.
+#We want sufficient amount of samples with both alleles so that we can determine the effect on mehtylation
+maf_filtered <- snps_genotypes_maf_df %>% filter_all(any_vars(. >= 0.2 & . <= 0.8))
+
+maf_filtered$POS <- rownames(maf_filtered)
+maf_filtered <- maf_filtered %>% relocate (POS, .before = snps_genotypes_maf)
+rownames(maf_filtered) <- NULL
+maf_filtered$POS <- as.numeric(maf_filtered$POS)
+
+#Filter genotypes based on MA filtered positions
+maf_filtered_gt <- snps_genotypes[snps_genotypes$POS %in% maf_filtered$POS, ] 
+
+#Generate MAF filtered plot title
+snps2_8maf <- nrow(maf_filtered)
+maf2_8_plot_title <- paste0("There are ", snps2_8maf, " meCpG-SNPs with 0.2 <= MAF <= 0.8")
+
+#Generate MAF filtered histogram
+maf2_8_plot <- ggplot(data = maf_filtered, aes(x = snps_genotypes_maf)) + geom_histogram(aes(fill = cut), color = "black", linewidth = 1, fill= "white", binwidth = 0.1) + stat_bin(binwidth = 0.1, geom = "text", colour = "black", vjust = -0.5, size = 3.5, aes(label = after_stat(count))) + scale_x_continuous(breaks = seq(0, 1, by = 0.1)) + labs(title = maf2_8_plot_title, x = "MAF", y = "Count")
+
+### Plot seems good
+
+#Replace all the adjusted genotypes with their original genotype. 
+maf_filtered_genotypes <- snps_gt[snps_gt$POS %in% maf_filtered_gt$POS, ] 
+rownames(maf_filtered_genotypes) <- NULL
+
+###
+### Up to here everything should be ok
+###
+
+# included_samples <- c(names(maf_filtered_genotypes)[1], samples_ids$Samples)
+#Keep the samples that were kept after QC.
+included_samples <- c(names(maf_filtered_genotypes)[1], samples_ids$Samples)
+#Sample names in the columns are already lost here in  "maf_filtered_genotypes" so naturally the column names can't be checked.
+#What does
+#Check if qc_filtered_gt is different from what it has to be 
+qc_filtered_gt <- maf_filtered_genotypes[, names(maf_filtered_genotypes) %in% included_samples]
+rownames(qc_filtered_gt) <- NULL
+
+#Turn it into a dataframe otherwise we get an error of incorrect number of dimensions.
+#This here works for chromosome 22 and qc_filtered_gt remains a dataframe because it has columns of samples
+#With 113 columns, 112 being samples and the first being a position. 
+qc_filtered_gt <- as.data.frame(qc_filtered_gt)
+
+#Sort the sample IDs.
+#drop = FALSE keeps it as a dataframe
+qc_filtered_gt <- qc_filtered_gt[, mixedorder(names(qc_filtered_gt)), drop = FALSE]
+#CZC2546 is not there and it is turned back in a "numeric".
+qc_filtered_gt <- qc_filtered_gt %>% relocate (POS, .before = CZC2546)
+
+#This is all correct 28/11/2024
+#Checked 5/12/2024 seems good
+#We are here
+
+#Add the REF/ALT alleles info in the genotypes dataframe.
+gt_filtered_re_alt <- snps_meth[snps_meth$POS %in% qc_filtered_gt$POS, ]
+gt_filtered_re_alt  <- gt_filtered_re_alt[, -c(1, 5, 6)]
+gt_filtered_re_alt_sorted <- gt_filtered_re_alt[order(gt_filtered_re_alt$POS), ]
+rownames(gt_filtered_re_alt_sorted) <- NULL
+gt_re_alt_clean <- gt_filtered_re_alt_sorted[,1:3]
+qc_filtered_gt <- merge(qc_filtered_gt, gt_re_alt_clean, by = "POS")
+qc_filtered_gt <- qc_filtered_gt %>% relocate (REF, ALT, .after = POS)
+
+#Seems fine up to here 11/28/2024
+
+#Combine the Ref/Alt columns and seperate their values with "\".
+qc_filtered_gt$Ref_Alt <- paste(qc_filtered_gt$REF, qc_filtered_gt$ALT, sep = "/")
+qc_filtered_gt <- qc_filtered_gt %>% select(-one_of(c("REF", "ALT")))
+qc_filtered_gt <- qc_filtered_gt %>% relocate (Ref_Alt, .after = POS)
+
+#Seems fine up to here 11/28/2024
+## Down here is possibly where it goes wrong as alleles are assigned to their position,
+## Did the previous intern just get lucky or what?
+## Even with her code it fucks up, or did a package get updated???
+## I have no clue anymore..
+
+#Make a function that replaces the genotypes with their alleles. 
+assign_gt_alleles <- function(gt, ref_alt_alleles) {
+  ref_alt_alleles <- unlist(strsplit(gsub("[/,]", " ", ref_alt_alleles), "\\s+"))
+  ref_allele <- toupper(ref_alt_alleles[1])
+  alt_alleles <- toupper(ref_alt_alleles[-1])
+  
+  if (gt == "0/0") {
+    allele_gt <- paste(ref_allele, ref_allele, sep = "/")
+  } else if (gt == "0/1") {
+    first_alt_allele <- alt_alleles[1]
+    allele_gt <- paste(ref_allele, first_alt_allele, sep = "/")
+  } else if (gt == "1/1") {
+    first_alt_allele <- alt_alleles[1]
+    allele_gt <- paste(first_alt_allele, first_alt_allele, sep = "/")
+  } else if (gt == "0/2") {
+    second_alt_allele <- alt_alleles[2]
+    allele_gt <- paste(ref_allele, second_alt_allele, sep = "/")
+  } else if (gt == "2/2") {
+    second_alt_allele <- alt_alleles[2]
+    allele_gt <- paste(second_alt_allele, second_alt_allele, sep = "/")
+  } else if (gt == "0/3") {
+    third_alt_allele <- alt_alleles[3]
+    allele_gt <- paste(ref_allele, third_alt_allele, sep = "/")
+  } else if (gt == "3/3") {
+    third_alt_allele <- alt_alleles[3]
+    allele_gt <- paste(third_alt_allele, third_alt_allele, sep = "/")
+  } else { 
+    allele_gt <- "weird"
+  }
+  
+  return(allele_gt)
+}
+
+#Seems the combining goes well. No issues.
+#One issues may be qc_filtered_gt has a Ref/alt with G/T,A
+#Tested it and it seems fine as it just ignores the "A"
+#Does the problem occur when adding the beta values to the positions?
+#Make a new dataframe with replaced genotypes for their alleles. 
+allele_gt <- lapply(qc_filtered_gt[grep("^CZC", names(qc_filtered_gt))], function(col) {
+  Map(assign_gt_alleles,col, ref_alt_alleles = qc_filtered_gt$Ref_Alt)
+})
+allele_gt_df <- as.data.frame(do.call(cbind, allele_gt))
+rownames(allele_gt_df) <- NULL
+allele_gt_df <- cbind(POS = qc_filtered_gt[, 1], allele_gt_df)
+flatten_list <- function(lst) { unlist(lst, recursive = FALSE) }
+allele_gt_df[] <- lapply(allele_gt_df, function(x) if (is.list(x)) flatten_list(x) else x)
+allele_gt_df <- as.data.frame(allele_gt_df)
+
+#allele_gt_df does not get assigned the proper allele combination to the sample and position.
+#It does not consider the row and/or column values
+
+#Filter out the SNPs that are out of the Hardy Weinberg equilibrium (HWE).
+#From the 10.615 meCpG-SNPs with 0.2 <= MAF <= 0.8, 9.650 were kept. 
+
+#Count the amount of occurances per genotype per SNP.
+hw_eq_gt <- allele_gt_df
+remove_slash <- function(x) {
+  return(gsub("/", "", x))
+}
+hw_eq_gt <- as.data.frame(lapply(hw_eq_gt, remove_slash))
+gt_counts <- apply(hw_eq_gt[, -1], 1, function(row) table(row))
+
+#Convert the small snp tables into vectors.
+snps_vectors <- list()
+convert_to_vector <- function(small_table) {
+  snp_vector <- as.vector(small_table)
+  names(snp_vector) <- names(small_table)
+  return(snp_vector)
+}
+snps_vectors <- lapply(gt_counts, convert_to_vector)
+
+#Add the snp positions to the snp vectors.
+snp_names <- hw_eq_gt$POS
+names(snps_vectors) <- snp_names
+
+#Keep only the snps with all three genotypes(WT, heterozygous for alternative allele, homozygous for alternative allele)
+#From the 10.615 snps, 10.496 had samples with all three gentoypes. 
+snps_vectors_3gt <- snps_vectors[lengths(snps_vectors) == 3]
+
+#Calculate the Hardy Weinberg equilibrium from the snp matrixes of triangular format and save their p values in a big list.
+#Loop over list of SNPs
+#Hardy-Weinberg equilibrium test on each SNP, called HwPerm()
+#creates a list called snp_p in which all SNP with their p-value are stored
+#The Hardy-Weinberg equilibrium (HWE) predicts the frequency of alleles and genotypes in a population with no #evolutionary pressure.
+snp_p <- list()
+for (snp in names(snps_vectors_3gt)) {
+  hw_eq <-tryCatch({
+    HWPerm(snps_vectors_3gt[[snp]], verbose = FALSE)
+  }, error = function(e) {
+    cat("Error occured while processing snp", snp, ":", conditionMessage(e), "\n")
+    return(NULL)
+  })
+  if (!is.null(hw_eq)) {
+    p_value <- hw_eq[["pval"]]
+    snp_p[[snp]] <- p_value
+  }
+} 
+
+
+#It appears some files were correctly replaced as we are getting the correct SNP positions again.
+#This is the case for both chromosome 21 and 22
+
+##Three monomorphic snp errors were encountered during the Hardy Weinberg equilibrium calculation, so they were excluded.
+#From the 10.496 snps, 10.493 were kept.
+#Error occured while processing snp 16451471 : missing value where TRUE/FALSE needed 
+#Error occured while processing snp 22376778 : missing value where TRUE/FALSE needed 
+#Error occured while processing snp 49119104 : missing value where TRUE/FALSE needed 
+#Error occured while processing snp 50276321 : missing value where TRUE/FALSE needed 
+### Up to here everything should be working
+
+#The error happens when beta_gt_df is generated. It doesn't look the way it is supposed to look for chr22. 
+#This leads to an error when we try to plot it in the next script.
+#Somewhere down here is where it is generated and it looks wrong.
+
+#Create a dataframe with the p values of each snp.
+snp_p_df <- t(as.data.frame(snp_p, row.names = "p_value"))
+rownames(snp_p_df) <- sub("^X", "", rownames(snp_p_df))
+snp_p_df <- as.data.frame(snp_p_df)
+snp_p_df$POS <- rownames(snp_p_df)
+rownames(snp_p_df) <- NULL
+snp_p_df <- snp_p_df %>% relocate (POS, .before = p_value)
+
+#Filter out the SNPs that have a p value < 0.05.
+#From the 10.493 snps, 9.650 were kept.
+snp_p_df$p_value <- round(snp_p_df$p_value, 2)
+
+#Check how many snps have a p value of 0.05. --> 111.
+snp_p_df_005 <- snp_p_df[snp_p_df$p_value == 0.05,]
+
+#Keep the snps with a p value >= 0.05.
+#Why do we want a p >= 0.05 value? Normally we want a lower value.
+#Because we want something that is not in Hardy Weinberg equllibrium
+snp_p_df <- snp_p_df[snp_p_df$p_value >= 0.05,]
+
+#########
+
+#Keep the allele genotypes only for the filtered SNP positions. 
+allele_gt_df <- allele_gt_df[allele_gt_df$POS %in% snp_p_df$POS, ]
+
+#Keep the genotypes only for the filtered SNP positions.
+qc_filtered_gt <- qc_filtered_gt[qc_filtered_gt$POS %in% snp_p_df$POS, ]
+
+
+#Extract the beta values and genotypes for the 9.650 meCpG-SNPs with 0.2 <= MAF <= 0.8 and HWE p-value >= 0.05.
+qc_beta <- snps_meth[snps_meth$POS %in% qc_filtered_gt$POS, ]
+qc_beta <- qc_beta[, -c(1, 3, 4, 5, 6)]
+qc_beta_sorted <- qc_beta[order(qc_beta$POS), ]
+rownames(qc_beta_sorted) <- NULL
+
+#Keep the samples that were kept after QC.
+included_ids <- c(names(qc_beta_sorted)[1], samples_ids$Samples)
+qc_filtered_beta <- qc_beta_sorted[, names(qc_beta_sorted) %in% included_ids]
+rownames(qc_filtered_beta) <- NULL
+
+
+#Merge the beta values of the SNPs with their genotypes.
+#Most likely something goes wrong here for chr22, but not for chr21?
+#qc_filtered_beta and allele_gt_df don't match as qc_filtered_beta has beta-values in samples without a C or G in either or both. 
+#Testing with i <- 1 and i <- 9 shows us that there are beta-values in impossible methylation sites.
+#row 9 has a T/T position with a beta value of 0.6
+#Either position with methylation is wrong or the position with the alleles is wrong.
+
+#beta_gt_df has beta values with allele combinations which can't be methylated
+#We are going to check if the beta values are correctly added to the alleles
+#For this we need qc_filtered_beta and allele_gt_df
+#are beta values methylation incorrect?
+#If we compare the results of beta_gt_list by comparing the methaylion values and positions, it is correct. 
+#We have also compared the alleles of the positions and they are also correct.
+#The only remaining option is wrong generation of methylation data generation???
+# abc <- snps_meth[snps_meth$POS == 15564997, ] Where we fill in a position of beta_gt
+#By that logic snps_meth should be incorrect
+
+beta_gt <- list()
+
+for (i in 1:nrow(allele_gt_df)) {
+  name <- allele_gt_df$POS[i]
+  matching_rows <- qc_filtered_beta[qc_filtered_beta$POS == name, ]
+  if (nrow(matching_rows) > 0) {
+  beta_gt[[i]] <- rbind(allele_gt_df[i, , drop = FALSE], matching_rows)
+  } else {
+  beta_gt[[i]] <- allele_gt_df[i, , drop = FALSE]
+  }
+}
+
+
+
+
+beta_gt_df <- do.call(rbind, beta_gt)
+rownames(beta_gt_df) <- NULL
+duplicated_pos <- duplicated(beta_gt_df$POS)
+beta_gt_df$POS[duplicated_pos] <- ""
+
+snps_genotypes_maf_df$POS <- rownames(snps_genotypes_maf_df)
+snps_genotypes_maf_df <- snps_genotypes_maf_df %>% relocate (POS, .before = snps_genotypes_maf)
+rownames(snps_genotypes_maf_df) <- NULL
+colnames(snps_genotypes_maf_df) <- c("POS", "MAF")
+
+###Something is definitely going wrong wih beta_gt_df because Beta values are present in T/T etc. Impossible to methylate.
+
+
+#Return the data in a list
+return(list(
+snps_gt = snps_gt,
+snps_genotypes = snps_genotypes,
+snps_genotypes_t = snps_genotypes_t,
+maf_plot = maf_plot,
+beta_gt_df = beta_gt_df,
+maf2_8_plot = maf2_8_plot,
+snp_p_df = snp_p_df,
+qc_filtered_beta = qc_filtered_beta,
+qc_filtered_gt = qc_filtered_gt,
+allele_gt_df = allele_gt_df,
+snps_genotypes_maf_df = snps_genotypes_maf_df
+))
+
+
+
+}
+```
+#snps_gt looks good
+#snps_genotypes looks good
+#snps_genotypes_t looks good
+#maf_plot looks good
+#maf2_8_plot looks good
+#snp_p_df looks good
+#qc_filtered_beta looks good
+#qc_filtered_gt looks good
+#allele_gt_df looks good
+#snps_genotypes_maf_df looks good
+
+#Take results from the returned list with the following
+#snps_gt <- Chr22_pheno$snps_gt
+#snps_genotypes <- Chr22_pheno$snps_genotypes
+#snps_genotypes_t <- Chr22_pheno$snps_genotypes_t
+#maf_plot <- Chr22_pheno$maf_plot
+
+
+#Save the dfs with the beta values and the genotypes and the genotype alleles as separate csv files. 
+#qc_filtered_beta line 330
+#qc_filtered_gt line 166
+#allele_gt_df line 231 C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/Chr22/
+```{r}
+write.csv(qc_filtered_beta, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/qc_filtered_beta22.csv", row.names = FALSE)
+write.csv(qc_filtered_gt, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/qc_filtered_gt22.csv", row.names = FALSE)
+write.csv(allele_gt_df, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/allele_gt_df22.csv", row.names = FALSE)
+```
+
+#Save the df with all the meCpG-SNPs MAFs as a csv file.
+# snps_genotypes_maf_df line 114
+```{r}
+write.csv(snps_genotypes_maf_df, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snps_genotypes_maf_df22.csv", row.names = FALSE)
+```
+
+#Save the df with the p values of all the meCpG-SNPs with HWE p-value >= 0.05 as a csv file. 
+# snp_p_df line 296
+```{r}
+write.csv(snp_p_df, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snp_p_df22.csv", row.names = FALSE)
+```
+
+#Save the MAF plots.
+# maf_plot line 129
+# maf2_8_plot line 145
+```{r}
+ggsave("C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/maf_plot22.png", maf_plot)
+ggsave("C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/maf2_8_plot22.png", maf2_8_plot) 
+```
+
+#Save the merged beta values of the SNPs with their genotypes as csv file.
+# beta_gt_df line 347
+```{r}
+write.csv(beta_gt_df, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/beta_gt_df22.csv", row.names = FALSE)
+```
+
+#Final csv file containing the meCpG-SNP genotypes and their beta values, for the meCpG-SNPs with 0.2 <= MAF <= 0.8 and HWE p-value >= 0.05: beta_gt_df
+
+# snps_gt line 90
+# snps_genotypes line 98
+# snps_genotypes_t line 106
+```{r}
+write.csv(snps_gt, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snps_gt22.csv", row.names = FALSE)
+write.csv(snps_genotypes, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snps_genotypes22.csv", row.names = FALSE)
+write.csv(snps_genotypes_t, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/snps_genotypes_t22.csv", row.names = FALSE)
+```

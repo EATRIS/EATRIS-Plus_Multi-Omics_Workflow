@@ -2,8 +2,9 @@
 title: "SNP-CpG_Prot-IPP"
 output: html_document
 params:
-  mae_hdf5_path: Z:/omics/MultiAssayExperiments/h5MAE/
-  rna_lm_results: 'Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/SNPcounts_RNApavalue_all.csv'
+  mae_hdf5_path: NULL
+  SNP_CpG_Dir: #Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB
+  rna_lm_results: #Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/SNPcounts_RNApavalue_all.csv
 ---
 
 
@@ -37,7 +38,7 @@ SNPs_overlapping_prot <- read.csv(params$snps_overlapping_prot, row.names = 1)
 df_list <- lapply(unique(SNPs_overlapping_prot$Gene_symbol), function(x) {
   SNP_coordinates <- SNPs_overlapping_prot[SNPs_overlapping_prot$Gene_symbol == x, "SNP_CpG"]
   Chr <- SNPs_overlapping_prot[SNPs_overlapping_prot$Gene_symbol == x, "CHR"][[1]]
-  genotype_path <- file.path('Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB', paste0("Chr", Chr), paste0("snps_genotypes", Chr, '.csv'))
+  genotype_path <- file.path(SNP_CpG_Dir, paste0("Chr", Chr), paste0("snps_genotypes", Chr, '.csv'))
   genotypes_df <- read.csv(genotype_path)
   genotypes_df <- genotypes_df[genotypes_df$POS %in% SNP_coordinates ,]
   genotypes_df

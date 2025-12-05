@@ -1,0 +1,1193 @@
+#Genomic features and genes of neighbouring CpGs.
+
+```{r}
+#Libraries
+library(vcfR)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(wtest)
+library(gtools)
+library(ggplot2)
+library(annotatr)
+library(AnnotationDbi)
+library(GenomicRanges)
+library(IRanges)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(AnnotationHub)
+library(data.table)
+library(reshape2)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(cowplot)
+```
+
+```{r}
+#Path to the hg19_cpg_islands or the local annotationHub database
+#hg19_basicgenes includes annotations like promoters, exons, introns etc.
+#hg19_cpg_islands includes CpG islands, shores and shelves.
+#Removed 'hg19_cpg_islands', requires annotatrs database access.
+
+annotations <- build_annotations(
+  genome = 'hg19',
+  annotations = c(
+    'hg19_basicgenes',         # Basic gene annotations (promoters, exons, introns, etc.)
+    'hg19_cpg_islands',        # CpG islands
+    'hg19_cpg_shores',         # CpG shores (2kb upstream/downstream of CpG islands)
+    'hg19_cpg_shelves',        # CpG shelves (2-4kb away from CpG islands)
+    'hg19_enhancers_fantom',   # Enhancers based on FANTOM5 data
+    'hg19_genes_5UTRs',        # 5' UTRs of genes
+    'hg19_genes_3UTRs',        # 3' UTRs of genes
+    'hg19_genes_exons',        # Exons of genes
+    'hg19_genes_introns',      # Introns of genes
+    'hg19_genes_intergenic'    # Intergenic regions
+  )
+)
+
+# Save your GRanges object to an RData file
+#save(annotations, file = "C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/gr_object.RData")
+# Load the GRanges object back into your R session
+#annotations <- load("gr_object.RData")
+
+filtered_snps_file_path <- paste0("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/Chr", chromosome_number, "/filtered_snps", chromosome_number, ".csv")
+filtered_snps <- read.csv(filtered_snps_file_path)
+
+p_values_file_path <- paste0("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/Chr", chromosome_number, "/p_values_", chromosome_number, ".csv")
+p_values <- read.csv(p_values_file_path)
+
+p_values <- p_values %>% filter(p_adjust_value < 0.05)
+
+filtered_snps <- as.data.frame(p_values$SNP_CpG)
+colnames(filtered_snps)[colnames(filtered_snps) == "p_values$SNP_CpG"] <- "POS"
+
+
+
+#The reference BED file with the positions of start and ending positions of CpGs on the chromosome
+ref_cpgs_chr_file_path <- paste0("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/Chr", chromosome_number, "/ref_cpgs_chr", chromosome_number, ".bed")
+ref_cpgs_chr <- read.table(ref_cpgs_chr_file_path,header = TRUE, col.names = c("chrom", "start", "end"))
+
+#add chr to the chrom values
+# Add the "chr" prefix to each row of the "chrom" column
+ref_cpgs_chr$chrom <- paste0("chr", ref_cpgs_chr$chrom)
+#Now this needs to be put below into "regions"
+
+
+# Randomly select 200 CpG locations to use in the random permutation
+set.seed(123)  # Set seed for reproducibility
+ref_cpgs_chr_random <- ref_cpgs_chr[sample(1:nrow(ref_cpgs_chr), 200, replace = FALSE), ]
+# Sort the dataframe based on the "start" column in ascending order
+ref_cpgs_chr_random <- ref_cpgs_chr_random[order(ref_cpgs_chr_random$start), ]
+rownames(ref_cpgs_chr_random) <- NULL
+
+#Don't actually need this, this is overall methylation. Doesn't use homo/hetero of alt refs
+#all_cpgs_mean_beta <- read.csv("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/all_cpgs_mean_beta20.csv")
+
+cpgs_db_gt_file_path <- paste0("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data/Chr", chromosome_number, "/cpgs_db_gt", chromosome_number, ".csv")
+cpgs_db_gt <- read.csv(cpgs_db_gt_file_path)
+
+#We create a dataframe which takes 200 random values from all cpgs before filtering the delta beta values.
+cpgs_db_gt_random <- cpgs_db_gt[sample(1:nrow(cpgs_db_gt), 200, replace = FALSE), ]
+# Sort the dataframe based on the "start" column in ascending order
+cpgs_db_gt_random <- cpgs_db_gt_random[order(cpgs_db_gt_random$CpG), ]
+rownames(cpgs_db_gt_random) <- NULL
+# Add 'chrom' column with the value "chr21"
+cpgs_db_gt_random$chrom <- "chr21"
+# Add 'end' column with the value of 'CpG' + 1
+cpgs_db_gt_random$end <- cpgs_db_gt_random$CpG + 1
+
+
+
+
+#These are correct
+cpgs_db_gt_homo_min03 <- cpgs_db_gt %>% 
+  filter(cpgs_db_gt$WT_Homo_alt_Delta_beta < -0.29)
+
+#These are correct
+cpgs_db_gt_hetero_min015 <- cpgs_db_gt %>% 
+  filter(cpgs_db_gt$WT_Heter_alt_Delta_beta < -0.14)
+
+#These are correct
+cpgs_db_gt_homo_plus03 <- cpgs_db_gt %>% 
+  filter(cpgs_db_gt$WT_Homo_alt_Delta_beta > 0.29)
+
+#These are correct
+cpgs_db_gt_hetero_plus015 <- cpgs_db_gt %>% 
+  filter(cpgs_db_gt$WT_Heter_alt_Delta_beta > 0.14)
+
+
+# The column "start" = "CpG" column 
+#Combine ref_cpgs_chr## and cpgs_db_gt_homo positions
+common_df_homo_plus03 <- merge(cpgs_db_gt_homo_plus03, ref_cpgs_chr, by.x = "CpG", by.y = "start")
+common_df_homo_min03 <- merge(cpgs_db_gt_homo_min03, ref_cpgs_chr, by.x = "CpG", by.y = "start")
+common_df_hetero_plus015 <- merge(cpgs_db_gt_hetero_plus015, ref_cpgs_chr, by.x = "CpG", by.y = "start")
+common_df_hetero_min015 <- merge(cpgs_db_gt_hetero_min015, ref_cpgs_chr, by.x = "CpG", by.y = "start")
+
+#We might need to make this BED file first with the two files above.
+#Read the BED file containing the genomic regions
+#we need to get the BED file from the Neighbouring_CpGs_DF_function to get all CpGs so we can find their regulatory function
+#This file has all CpG positions within +- 1000 NTs of the CpG-SNP
+#We don't need the ref_cpgs_chr## file, we use the cpgs_db_gt from Neighbouring_CpGs_Function
+# Create a GRanges object from the common_df_homo
+regions_homo_plus03 <- GRanges(
+  seqnames = common_df_homo_plus03$chrom,           # Chromosome names (chr1, chr2, ...)
+  ranges = IRanges(start = common_df_homo_plus03$CpG, end = common_df_homo_plus03$end)  # Start and end positions
+)
+
+regions_homo_min03 <- GRanges(
+  seqnames = common_df_homo_min03$chrom,           # Chromosome names (chr1, chr2, ...)
+  ranges = IRanges(start = common_df_homo_min03$CpG, end = common_df_homo_min03$end)  # Start and end positions
+)
+
+regions_hetero_plus015 <- GRanges(
+  seqnames = common_df_hetero_plus015$chrom,           # Chromosome names (chr1, chr2, ...)
+  ranges = IRanges(start = common_df_hetero_plus015$CpG, end = common_df_hetero_plus015$end)  # Start and end positions
+)
+
+regions_hetero_min015 <- GRanges(
+  seqnames = common_df_hetero_min015$chrom,           # Chromosome names (chr1, chr2, ...)
+  ranges = IRanges(start = common_df_hetero_min015$CpG, end = common_df_hetero_min015$end)  # Start and end positions
+)
+
+ref_cpgs_chr_random_GRanges <- GRanges(
+  seqnames = ref_cpgs_chr_random$chrom,           # Chromosome names (chr1, chr2, ...)
+  ranges = IRanges(start = ref_cpgs_chr_random$start, end = ref_cpgs_chr_random$end)  # Start and end positions
+)
+
+cpgs_db_gt_random_GRanges <- GRanges(
+  seqnames = cpgs_db_gt_random$chrom,           # Chromosome names (chr1, chr2, ...)
+  ranges = IRanges(start = cpgs_db_gt_random$CpG, end = cpgs_db_gt_random$end)  # Start and end positions
+)
+
+#For the use of annotatr do I need to give CpG-SNPs only or the regions around as well?
+#Annotate the regions with the loaded annotations
+annotated_regions_homo_plus03 <- annotate_regions(
+  regions = regions_homo_plus03,
+  annotations = annotations,
+  ignore.strand = TRUE, #Option to ignore strand information
+  quiet = FALSE         #Display progress
+)
+
+#For the use of annotatr do I need to give CpG-SNPs only or the regions around as well?
+#Annotate the regions with the loaded annotations
+annotated_regions_homo_min03 <- annotate_regions(
+  regions = regions_homo_min03,
+  annotations = annotations,
+  ignore.strand = TRUE, #Option to ignore strand information
+  quiet = FALSE         #Display progress
+)
+
+annotated_regions_hetero_plus015 <- annotate_regions(
+  regions = regions_hetero_plus015,
+  annotations = annotations,
+  ignore.strand = TRUE, #Option to ignore strand information
+  quiet = FALSE         #Display progress
+)
+
+annotated_regions_hetero_min015 <- annotate_regions(
+  regions = regions_hetero_min015,
+  annotations = annotations,
+  ignore.strand = TRUE, #Option to ignore strand information
+  quiet = FALSE         #Display progress
+)
+
+annotated_regions_randomref <- annotate_regions(
+  regions = ref_cpgs_chr_random_GRanges,
+  annotations = annotations,
+  ignore.strand = TRUE, #Option to ignore strand information
+  quiet = FALSE         #Display progress
+)
+
+annotated_cpgs_db_gt_random_GRanges <- annotate_regions(
+  regions = cpgs_db_gt_random_GRanges,
+  annotations = annotations,
+  ignore.strand = TRUE, #Option to ignore strand information
+  quiet = FALSE         #Display progress
+)
+
+
+# Combine genomic ranges and metadata into a single data frame
+#Single nucleotides can still fall within different regions
+#As a result annotated_df has more obs than common_df
+annotated_df_homo_plus03 <- as.data.frame(mcols(annotated_regions_homo_plus03))
+annotated_df_homo_min03 <- as.data.frame(mcols(annotated_regions_homo_min03))
+annotated_df_hetero_plus015 <- as.data.frame(mcols(annotated_regions_hetero_plus015))
+annotated_df_hetero_min015 <- as.data.frame(mcols(annotated_regions_hetero_min015))
+annotated_df_regions_randomref <- as.data.frame(mcols(annotated_regions_randomref))
+annotated_df_cpgs_db_gt_random_GRanges <- as.data.frame(mcols(annotated_cpgs_db_gt_random_GRanges))
+
+# Remove "annot." from each column name
+colnames(annotated_df_homo_plus03) <- gsub("^annot\\.", "", colnames(annotated_df_homo_plus03))
+colnames(annotated_df_homo_min03) <- gsub("^annot\\.", "", colnames(annotated_df_homo_min03))
+colnames(annotated_df_hetero_plus015) <- gsub("^annot\\.", "", colnames(annotated_df_hetero_plus015))
+colnames(annotated_df_hetero_min015) <- gsub("^annot\\.", "", colnames(annotated_df_hetero_min015))
+colnames(annotated_df_regions_randomref) <- gsub("^annot\\.", "", colnames(annotated_df_regions_randomref))
+colnames(annotated_df_cpgs_db_gt_random_GRanges) <- gsub("^annot\\.", "", colnames(annotated_df_cpgs_db_gt_random_GRanges))
+
+# Check for duplicate rows based on selected columns (chromosome, start, end)
+#unique(unique_annotated_df$type) 
+#hg19_cpg_inter = CpG islands or CpG-related regions, possibly indicating that it highlights intergenic areas that are near or around CpG sites.
+#hg19_cpg_shelves = CpG shelves are regions that are 2–4 kb away from CpG islands. These are also considered regulatory regions but are further away from the core CpG islands
+#hg19_cpg_shores = CpG shores refer to regions that are 2 kb up or downstream of CpG islands. These are also often involved in gene regulation and can have significant epigenetic relevance
+#hg19_cpg_islands = CpG islands are regions of the genome that have a high frequency of CpG sites (a cytosine followed by a guanine) and are often associated with gene promoters and transcription regulation. CpG islands play a critical role in epigenetics, especially in DNA methylation patterns
+
+# Create a new column with the count of duplications for each unique combination
+annotated_df_hetero_plus015$CpG_count <- ave(seq_len(nrow(annotated_df_hetero_plus015)), 
+                                      annotated_df_hetero_plus015$seqnames, 
+                                      annotated_df_hetero_plus015$start, 
+                                      annotated_df_hetero_plus015$end, 
+                                      FUN = length)
+
+# Create a new column with the count of duplications for each unique combination
+annotated_df_hetero_min015$CpG_count <- ave(seq_len(nrow(annotated_df_hetero_min015)), 
+                                      annotated_df_hetero_min015$seqnames, 
+                                      annotated_df_hetero_min015$start, 
+                                      annotated_df_hetero_min015$end, 
+                                      FUN = length)
+
+# Create a new column with the count of duplications for each unique combination
+annotated_df_homo_plus03$CpG_count <- ave(seq_len(nrow(annotated_df_homo_plus03)), 
+                                      annotated_df_homo_plus03$seqnames, 
+                                      annotated_df_homo_plus03$start, 
+                                      annotated_df_homo_plus03$end, 
+                                      FUN = length)
+
+# Create a new column with the count of duplications for each unique combination
+annotated_df_homo_min03$CpG_count <- ave(seq_len(nrow(annotated_df_homo_min03)), 
+                                      annotated_df_homo_min03$seqnames, 
+                                      annotated_df_homo_min03$start, 
+                                      annotated_df_homo_min03$end, 
+                                      FUN = length)
+
+# Create a new column with the count of duplications for each unique combination
+annotated_df_regions_randomref$CpG_count <- ave(seq_len(nrow(annotated_df_regions_randomref)), 
+                                      annotated_df_regions_randomref$seqnames, 
+                                      annotated_df_regions_randomref$start, 
+                                      annotated_df_regions_randomref$end, 
+                                      FUN = length)
+
+# Create a new column with the count of duplications for each unique combination
+annotated_df_cpgs_db_gt_random_GRanges$CpG_count <- ave(seq_len(nrow(annotated_df_cpgs_db_gt_random_GRanges)), 
+                                      annotated_df_cpgs_db_gt_random_GRanges$seqnames, 
+                                      annotated_df_cpgs_db_gt_random_GRanges$start, 
+                                      annotated_df_cpgs_db_gt_random_GRanges$end, 
+                                      FUN = length)
+
+
+#Remove the duplicates
+unique_annotated_df_hetero_plus015 <- annotated_df_hetero_plus015[!duplicated(annotated_df_hetero_plus015[, c("seqnames", "start", "end")]), ]
+# Modify the "type" column to keep only the part after the last "_"
+unique_annotated_df_hetero_plus015$type <- sub(".*_(.*)$", "\\1", unique_annotated_df_hetero_plus015$type)
+
+#Remove the duplicates
+unique_annotated_df_hetero_min015 <- annotated_df_hetero_min015[!duplicated(annotated_df_hetero_min015[, c("seqnames", "start", "end")]), ]
+# Modify the "type" column to keep only the part after the last "_"
+unique_annotated_df_hetero_min015$type <- sub(".*_(.*)$", "\\1", unique_annotated_df_hetero_min015$type)
+
+# Remove the duplicates
+unique_annotated_df_homo_plus03 <- annotated_df_homo_plus03[!duplicated(annotated_df_homo_plus03[, c("seqnames", "start", "end")]), ]
+# Modify the "type" column to keep only the part after the last "_"
+unique_annotated_df_homo_plus03$type <- sub(".*_(.*)$", "\\1", unique_annotated_df_homo_plus03$type)
+
+# Remove the duplicates
+unique_annotated_df_homo_min03 <- annotated_df_homo_min03[!duplicated(annotated_df_homo_min03[, c("seqnames", "start", "end")]), ]
+unique_annotated_df_homo_min03$type <- sub(".*_(.*)$", "\\1", unique_annotated_df_homo_min03$type)
+
+# Remove the duplicates
+unique_randomperm <- annotated_df_regions_randomref[!duplicated(annotated_df_regions_randomref[, c("seqnames", "start", "end")]), ]
+unique_randomperm$type <- sub(".*_(.*)$", "\\1", unique_randomperm$type)
+
+# Remove the duplicates
+unique_cpgs_db_gt_randomperm <- annotated_df_cpgs_db_gt_random_GRanges[!duplicated(annotated_df_cpgs_db_gt_random_GRanges[, c("seqnames", "start", "end")]), ]
+unique_cpgs_db_gt_randomperm$type <- sub(".*_(.*)$", "\\1", unique_cpgs_db_gt_randomperm$type)
+
+
+
+# Add a new column to store matching filtered_snps$POS values
+unique_annotated_df_homo_min03$SNP_CpG <- lapply(seq_len(nrow(unique_annotated_df_homo_min03)), function(i) {
+  # Filter the POS values that fall within the range [start, end] for each row
+  filtered_snps$POS[filtered_snps$POS >= unique_annotated_df_homo_min03$start[i] & 
+                    filtered_snps$POS <= unique_annotated_df_homo_min03$end[i]]
+})
+
+unique_annotated_df_homo_min03$SNP_CpG <- sapply(unique_annotated_df_homo_min03$SNP_CpG, paste, collapse = ", ")
+
+
+
+##Create a dataframe with the SNP-CpGs which fall within the window for homozygoys <-0.3.
+homo_min03_SNPCpG_window <- unique_annotated_df_homo_min03 %>%
+  rowwise() %>%
+  mutate(
+    matched_CpGs = list(
+      cpgs_db_gt_homo_min03$CpG[
+        cpgs_db_gt_homo_min03$CpG >= start & cpgs_db_gt_homo_min03$CpG <= end
+      ]
+    )
+  ) %>%
+  unnest(cols = c(matched_CpGs)) %>%
+  ungroup()
+
+##Create a dataframe with the SNP-CpGs which fall within the window for homozygous >0.3.
+homo_plus03_SNPCpG_window <- unique_annotated_df_homo_plus03 %>%
+  rowwise() %>%
+  mutate(
+    matched_CpGs = list(
+      cpgs_db_gt_homo_plus03$CpG[
+        cpgs_db_gt_homo_plus03$CpG >= start & cpgs_db_gt_homo_plus03$CpG <= end
+      ]
+    )
+  ) %>%
+  unnest(cols = c(matched_CpGs)) %>%
+  ungroup()
+
+##Create a dataframe with the SNP-CpGs which fall within the window for heterozygous <-0.15
+hetero_min015_SNPCpG_window <- unique_annotated_df_hetero_min015 %>%
+  rowwise() %>%
+  mutate(
+    matched_CpGs = list(
+      cpgs_db_gt_hetero_min015$CpG[
+        cpgs_db_gt_hetero_min015$CpG >= start & cpgs_db_gt_hetero_min015$CpG <= end
+      ]
+    )
+  ) %>%
+  unnest(cols = c(matched_CpGs)) %>%
+  ungroup()
+
+##Create a dataframe with the SNP-CpGs which fall within the window for heterozygous >0.15.
+hetero_plus015_SNPCpG_window <- unique_annotated_df_hetero_plus015 %>%
+  rowwise() %>%
+  mutate(
+    matched_CpGs = list(
+      cpgs_db_gt_hetero_plus015$CpG[
+        cpgs_db_gt_hetero_plus015$CpG >= start & cpgs_db_gt_hetero_plus015$CpG <= end
+      ]
+    )
+  ) %>%
+  unnest(cols = c(matched_CpGs)) %>%
+  ungroup()
+
+
+# Filter rows where type is "hg19_genes_promoters" from each dataframe
+promoter_df_hetero_min015 <- unique_annotated_df_hetero_min015 %>%
+  filter(type == "promoters")
+
+promoter_df_hetero_plus015 <- unique_annotated_df_hetero_plus015 %>%
+  filter(type == "promoters")
+
+promoter_df_homo_min03 <- unique_annotated_df_homo_min03 %>%
+  filter(type == "promoters")
+
+promoter_df_homo_plus03 <- unique_annotated_df_homo_plus03 %>%
+  filter(type == "promoters")
+
+# Filter rows where type is "promoters" from each dataframe
+promoter_df_regions_unique_randomperm <- unique_randomperm %>%
+  filter(type == "promoters")
+
+# Filter rows where type is "promoters" from each dataframe
+promoter_unique_cpgs_db_gt_randomperm <- unique_cpgs_db_gt_randomperm %>%
+  filter(type == "promoters")
+
+# Combine the filtered rows into a single dataframe
+# We can do this for each chromosome and create a file with promoter related genes.
+promoter_regions_df <- bind_rows(promoter_df_hetero_min015,
+                                 promoter_df_hetero_plus015,
+                                 promoter_df_homo_min03,
+                                 promoter_df_homo_plus03)
+
+#The next plots show the relation of changes in methylation of CpG positions and their relation to genomic features
+#plot bar chart
+# Calculate the total count of the Y-axis
+total_count <- sum(table(unique_annotated_df_homo_plus03$type))
+
+# Create the plot with the total count annotation
+pre_plot_homo_plus03 <- ggplot(unique_annotated_df_homo_plus03, aes(x = type)) +
+  geom_bar(fill = "darkblue") +                      # Create the bar plot
+  geom_text(stat = "count",                        # Add text labels on bars
+            aes(label = ..count..), 
+            vjust = -0.5,                          # Adjust vertical position above bars
+            color = "black",                       # Text color
+            size = 3) +                            # Text size
+  annotate("text",                                 # Add annotation for total count
+           x = 1,                                 # X position (adjust if needed)
+           y = max(table(unique_annotated_df_homo_plus03$type)) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_count), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Genomic Features Chr21, Homozygous, ΔB > 0.3",
+       x = "Genomic Feature",
+       y = "Neighbouring CpG Count") +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+# Create a text annotation as a separate grob
+caption <- ggdraw() +
+  draw_label("Created using annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color
+
+# Combine the plot and the caption
+plot_homo_plus03 <- plot_grid(pre_plot_homo_plus03, caption, 
+                               ncol = 1, 
+                               rel_heights = c(1, 0.05)) # Adjust height proportions
+
+#plot bar chart
+# Calculate the total count of the Y-axis
+total_count <- sum(table(unique_annotated_df_homo_min03$type))
+
+# Create the plot with the total count annotation
+pre_plot_homo_min03 <- ggplot(unique_annotated_df_homo_min03, aes(x = type)) +
+  geom_bar(fill = "darkblue") +                      # Create the bar plot
+  geom_text(stat = "count",                        # Add text labels on bars
+            aes(label = ..count..), 
+            vjust = -0.5,                          # Adjust vertical position above bars
+            color = "black",                       # Text color
+            size = 3) +                            # Text size
+  annotate("text",                                 # Add annotation for total count
+           x = 1,                                 # X position (adjust if needed)
+           y = max(table(unique_annotated_df_homo_min03$type)) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_count), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Genomic Features Chr21, Homozygous, ΔB < -0.3",
+       x = "Genomic Feature",
+       y = "Neighbouring CpG Count") +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+# Create a text annotation as a separate grob
+caption <- ggdraw() +
+  draw_label("Created using annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color
+
+# Combine the plot and the caption
+plot_homo_min03 <- plot_grid(pre_plot_homo_min03, caption, 
+                               ncol = 1, 
+                               rel_heights = c(1, 0.05)) # Adjust height proportions
+
+#plot bar chart
+# Calculate the total count of the Y-axis
+total_count <- sum(table(unique_annotated_df_hetero_plus015$type))
+
+# Create the plot with the total count annotation
+pre_plot_hetero_plus015 <- ggplot(unique_annotated_df_hetero_plus015, aes(x = type)) +
+  geom_bar(fill = "darkblue") +                      # Create the bar plot
+  geom_text(stat = "count",                        # Add text labels on bars
+            aes(label = ..count..), 
+            vjust = -0.5,                          # Adjust vertical position above bars
+            color = "black",                       # Text color
+            size = 3) +                            # Text size
+  annotate("text",                                 # Add annotation for total count
+           x = 1,                                 # X position (adjust as needed)
+           y = max(table(unique_annotated_df_hetero_plus015$type)) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_count), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Genomic Features Chr21, Heterozygous, ΔB > 0.15",
+       x = "Genomic Feature",
+       y = "Neighbouring CpG Count") +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+# Create a text annotation as a separate grob
+caption <- ggdraw() +
+  draw_label("Created using annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color
+
+# Combine the plot and the caption
+plot_hetero_plus015 <- plot_grid(pre_plot_hetero_plus015, caption, 
+                               ncol = 1, 
+                               rel_heights = c(1, 0.05)) # Adjust height proportions
+
+
+
+#plot bar chart
+# Calculate the total count of the Y-axis
+total_count <- sum(table(unique_annotated_df_hetero_min015$type))
+
+# Create the plot with the total count annotation
+pre_plot_hetero_min015 <- ggplot(unique_annotated_df_hetero_min015, aes(x = type)) +
+  geom_bar(fill = "darkblue") +                      # Create the bar plot
+  geom_text(stat = "count",                        # Add text labels on bars
+            aes(label = ..count..), 
+            vjust = -0.5,                          # Adjust vertical position above bars
+            color = "black",                       # Text color
+            size = 3) +                            # Text size
+  annotate("text",                                 # Add annotation for total count
+           x = 1,                                  # X position (adjust as needed)
+           y = max(table(unique_annotated_df_hetero_min015$type)) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_count), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Genomic Features Chr21, Heterozygous, ΔB < -0.15",
+       x = "Genomic Feature",
+       y = "Neighbouring CpG Count") + 
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+# Create a text annotation as a separate grob
+caption <- ggdraw() +
+  draw_label("Created using annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color
+
+# Combine the plot and the caption
+plot_hetero_min015 <- plot_grid(pre_plot_hetero_min015, caption, 
+                               ncol = 1, 
+                               rel_heights = c(1, 0.05)) # Adjust height proportions
+
+          
+          
+          
+          
+          
+
+# Combine data frames and add a group variable, including "randomperm"
+Genomicregions_groupedbar <- bind_rows(
+  mutate(unique_annotated_df_homo_plus03, group = "Homozygous, ΔB > 0.3"),
+  mutate(unique_annotated_df_homo_min03, group = "Homozygous, ΔB < -0.3"),
+  mutate(unique_annotated_df_hetero_plus015, group = "Heterozygous, ΔB > 0.15"),
+  mutate(unique_annotated_df_hetero_min015, group = "Heterozygous, ΔB < -0.15"),
+  mutate(unique_cpgs_db_gt_randomperm, group = "Random Permutation")
+)
+
+# Calculate percentages and totals
+# Calculate percentages and totals
+grouped_counts <- Genomicregions_groupedbar %>%
+  count(type, group) %>%
+  group_by(group) %>%
+  mutate(
+    percentage = (n / sum(n)) * 100,  # Convert counts to percentages
+    total_group = sum(n)             # Total counts for each group
+  )
+
+# Extract totals for annotation
+totals <- grouped_counts %>%
+  group_by(group) %>%
+  summarise(total_group = unique(total_group)) %>%
+  mutate(annotation_label = paste(group, "Total:", total_group))  # Prepare annotation text
+
+# Create the grouped bar plot with percentages
+grouped_genomicregions_groupedbarplot <- ggplot(grouped_counts, aes(x = type, y = percentage, fill = group)) +
+  geom_bar(position = "dodge", stat = "identity") +  # Use percentages for Y-axis
+  geom_text(aes(label = paste0(round(percentage, 1), "%")),  # Add percentages as labels
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, color = "black", size = 1) +
+  annotate("text", x = 0.5, y = 100, label = paste(totals$annotation_label, collapse = "\n"), 
+           hjust = 0, vjust = 1, color = "red", size = 3) +  # Add total counts in the top left
+  labs(title = "Genomic Features Chr21: Beta value changes",
+       x = "Genomic Feature",
+       y = "Percentage") +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1)) + 
+  scale_fill_manual(values = c("Homozygous, ΔB > 0.3" = "skyblue", 
+                               "Homozygous, ΔB < -0.3" = "lightgreen", 
+                               "Heterozygous, ΔB > 0.15" = "orange", 
+                               "Heterozygous, ΔB < -0.15" = "lightcoral",
+                               "Random Permutation" = "gray")) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 100))  # Fix Y-axis to 0-100
+
+# Add caption as a separate text box
+caption <- ggdraw() +
+  draw_label("Created using annotatr in Rstudio", 
+             x = 0.95, y = 1.05,   # Bottom-right corner
+             hjust = 1, vjust = 0, # Align to the right and bottom
+             size = 10, color = "gray40")
+
+# Combine plot and caption
+plot_groupbar_genomicregions <- plot_grid(
+  grouped_genomicregions_groupedbarplot, caption, 
+  ncol = 1, 
+  rel_heights = c(1, 0.05) # Adjust height proportions
+)
+
+
+
+#plot bar chart
+#Create the random_perm_plot
+pre_randomperm_plot <- ggplot(unique_randomperm, aes(x = type)) +
+  geom_bar(fill = "skyblue") +                      # Create the bar plot
+  geom_text(stat = "count",                        # Add text labels on bars
+            aes(label = ..count..), 
+            vjust = -0.5,                          # Adjust vertical position above bars
+            color = "black",                       # Text color
+            size = 3) +                            # Text size
+  labs(title = "Genomic Features Random permutation",
+       x = "Genomic Feature",
+       y = "Count") +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+# Create a text annotation as a separate grob
+caption <- ggdraw() +
+  draw_label("Created using annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color
+
+# Combine the plot and the caption
+randomperm_plot <- plot_grid(pre_randomperm_plot, caption, 
+                        ncol = 1, 
+                        rel_heights = c(1, 0.05)) # Adjust height proportions
+
+
+
+
+
+#Creating bar plot based on CpGs amount per gene
+# Summarize the CpG_count by Gene
+summarized_data_homo_plus03 <- unique_annotated_df_homo_plus03 %>%
+  group_by(symbol) %>%
+  summarize(total_CpG_count = sum(CpG_count, na.rm = TRUE))  # Sum CpG_count for each Gene
+
+# Calculate the total CpG count for all genes
+total_CpG_count_all_genes <- sum(summarized_data_homo_plus03$total_CpG_count, na.rm = TRUE)
+
+# Add a percentage column
+summarized_data_homo_plus03 <- summarized_data_homo_plus03 %>%
+  mutate(percentage_CpG_count = (total_CpG_count / total_CpG_count_all_genes) * 100)
+
+# Create the main plot with percentages
+pre_plot_gene_cpg_homo_plus03 <- ggplot(summarized_data_homo_plus03, aes(x = symbol, y = percentage_CpG_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  # Use stat = "identity" to set y as percentage_CpG_count
+  geom_text(aes(label = paste0(round(percentage_CpG_count, 1), "%")),  # Add percentage on top of bars
+            vjust = -0.5,                         # Adjust vertical position above the bar
+            color = "black",                      # Text color
+            size = 3) +                           # Text size
+  annotate("text",                                 # Add annotation for total CpG count
+           x = 1,                                  # X position (adjust as needed)
+           y = max(summarized_data_homo_plus03$percentage_CpG_count) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_CpG_count_all_genes), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Neighbouring CpG, Chr21, Homozygous, ΔB > 0.3",
+       x = "Gene",
+       y = "Percentage of Total Neighbouring CpG") +  # Update y-axis label
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels if necessary
+
+# Create a caption as a separate grob
+caption <- ggdraw() +
+  draw_label("Created with annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color of text
+
+# Combine the plot and the caption
+plot_gene_cpg_homo_plus03 <- plot_grid(pre_plot_gene_cpg_homo_plus03, caption, 
+                        ncol = 1, 
+                        rel_heights = c(1, 0.05)) # Adjust height proportions
+
+
+
+# Summarize the CpG_count by Gene
+summarized_data_homo_min03 <- unique_annotated_df_homo_min03 %>%
+  group_by(symbol) %>%
+  summarize(total_CpG_count = sum(CpG_count, na.rm = TRUE))  # Sum CpG_count for each Gene
+
+# Calculate the total CpG count for all genes
+total_CpG_count_all_genes <- sum(summarized_data_homo_min03$total_CpG_count, na.rm = TRUE)
+
+# Add a percentage column
+summarized_data_homo_min03 <- summarized_data_homo_min03 %>%
+  mutate(percentage_CpG_count = (total_CpG_count / total_CpG_count_all_genes) * 100)
+
+# Create the main plot with percentages
+pre_plot_gene_cpg_homo_min03 <- ggplot(summarized_data_homo_min03, aes(x = symbol, y = percentage_CpG_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  # Use stat = "identity" to set y as percentage_CpG_count
+  geom_text(aes(label = paste0(round(percentage_CpG_count, 1), "%")),  # Add percentage on top of bars
+            vjust = -0.5,                         # Adjust vertical position above the bar
+            color = "black",                      # Text color
+            size = 3) +                           # Text size
+  annotate("text",                                 # Add annotation for total CpG count
+           x = 1,                                  # X position (adjust as needed)
+           y = max(summarized_data_homo_min03$percentage_CpG_count) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_CpG_count_all_genes), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Neighbouring CpG Chr21, Homozygous, ΔB < -0.3",
+       x = "Gene",
+       y = "Percentage of Total Neighbouring CpG") +  # Update y-axis label
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels if necessary
+
+# Create a caption as a separate grob
+caption <- ggdraw() +
+  draw_label("Created with annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color of text
+
+# Combine the plot and the caption
+plot_gene_cpg_homo_min03 <- plot_grid(pre_plot_gene_cpg_homo_min03, caption, 
+                                       ncol = 1, 
+                                       rel_heights = c(1, 0.05)) # Adjust height proportions
+
+
+
+
+# Summarize the CpG_count by Gene
+summarized_data_hetero_plus015 <- unique_annotated_df_hetero_plus015 %>%
+  group_by(symbol) %>%
+  summarize(total_CpG_count = sum(CpG_count, na.rm = TRUE))  # Sum CpG_count for each Gene
+
+# Calculate the total CpG count for all genes
+total_CpG_count_all_genes <- sum(summarized_data_hetero_plus015$total_CpG_count, na.rm = TRUE)
+
+# Add a percentage column
+summarized_data_hetero_plus015 <- summarized_data_hetero_plus015 %>%
+  mutate(percentage_CpG_count = (total_CpG_count / total_CpG_count_all_genes) * 100)
+
+# Create the main plot with percentages
+pre_plot_gene_cpg_hetero_plus015 <- ggplot(summarized_data_hetero_plus015, aes(x = symbol, y = percentage_CpG_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  # Use stat = "identity" to set y as percentage_CpG_count
+  geom_text(aes(label = paste0(round(percentage_CpG_count, 1), "%")),  # Add percentage on top of bars
+            vjust = -0.5,                         # Adjust vertical position above the bar
+            color = "black",                      # Text color
+            size = 3) +                           # Text size
+  annotate("text",                                 # Add annotation for total CpG count
+           x = 1,                                  # X position (adjust as needed)
+           y = max(summarized_data_hetero_plus015$percentage_CpG_count) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_CpG_count_all_genes), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Neighbouring CpG Chr21, Heterozygous, ΔB > 0.15",
+       x = "Gene",
+       y = "Percentage of Total Neighbouring CpG") +  # Update y-axis label
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels if necessary
+
+# Create a caption as a separate grob
+caption <- ggdraw() +
+  draw_label("Created with annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color of text
+
+# Combine the plot and the caption
+plot_gene_cpg_hetero_plus015 <- plot_grid(pre_plot_gene_cpg_hetero_plus015, caption, 
+                                           ncol = 1, 
+                                           rel_heights = c(1, 0.05)) # Adjust height proportions
+
+
+
+#Creating bar plot based on CpGs amount per gene
+# Summarize the CpG_count by Gene
+summarized_data_hetero_min015 <- unique_annotated_df_hetero_min015 %>%
+  group_by(symbol) %>%
+  summarize(total_CpG_count = sum(CpG_count, na.rm = TRUE))  # Sum CpG_count for each Gene
+
+# Calculate the total CpG count for all genes
+total_CpG_count_all_genes <- sum(summarized_data_hetero_min015$total_CpG_count, na.rm = TRUE)
+
+# Calculate percentages for each gene
+summarized_data_hetero_min015 <- summarized_data_hetero_min015 %>%
+  mutate(percentage_CpG_count = (total_CpG_count / total_CpG_count_all_genes) * 100)  # Convert to percentage
+
+# Create the main plot with percentages
+pre_plot_gene_cpg_hetero_min015 <- ggplot(summarized_data_hetero_min015, aes(x = symbol, y = percentage_CpG_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  # Use stat = "identity" to set y as percentage_CpG_count
+  geom_text(aes(label = paste0(round(percentage_CpG_count, 1), "%")),  # Display percentage on top of bars
+            vjust = -0.5,                         # Adjust vertical position above the bar
+            color = "black",                      # Text color
+            size = 3) +                           # Text size
+  annotate("text",                                 # Add annotation for total CpG count
+           x = 1,                                  # X position (adjust as needed)
+           y = max(summarized_data_hetero_min015$percentage_CpG_count) + 5, # Y position above highest bar
+           label = paste("Total CpG Count:", total_CpG_count_all_genes), # Text to display
+           hjust = 0,                              # Horizontal alignment
+           color = "red",                          # Annotation text color
+           size = 4) +                             # Text size
+  labs(title = "Neighbouring CpG Chr21, Heterozygous, ΔB < -0.15",
+       x = "Gene",
+       y = "Percentage of Total Neighbouring CpG") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels if necessary
+
+# Create a caption as a separate grob
+caption <- ggdraw() +
+  draw_label("Created with annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color of text
+
+# Combine the plot and the caption
+plot_gene_cpg_hetero_min015 <- plot_grid(pre_plot_gene_cpg_hetero_min015, caption, 
+                                           ncol = 1, 
+                                           rel_heights = c(1, 0.05)) # Adjust height proportions
+
+#Create same barplot for unique_randomperm
+#Creating bar plot based on CpGs amount per gene
+# Summarize the CpG_count by Gene
+summarized_unique_randomperm <- unique_randomperm %>%
+  group_by(symbol) %>%
+  summarize(total_CpG_count = sum(CpG_count, na.rm = TRUE))  # Sum CpG_count for each Gene
+
+# Create the main plot
+pre_plot_unique_randomperm <- ggplot(summarized_unique_randomperm, aes(x = symbol, y = total_CpG_count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  # Use stat = "identity" to set y as total_CpG_count
+  geom_text(aes(label = total_CpG_count),         # Add the count on top of each bar
+            vjust = -0.5,                         # Adjust vertical position above the bar
+            color = "black",                      # Text color
+            size = 3) +                           # Text size
+  labs(title = "Random permutation Chr21",
+       x = "Gene",
+       y = "Neighbouring CpG") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels if necessary
+
+# Create a caption as a separate grob
+caption <- ggdraw() +
+  draw_label("Created with annotatr in Rstudio", 
+             x = 0.95, y = 1.05,                  # Position at bottom-right
+             hjust = 1, vjust = 0,               # Align text to bottom-right
+             size = 10, color = "gray40")        # Adjust size and color of text
+
+# Combine the plot and the caption
+plot_unique_randomperm <- plot_grid(pre_plot_unique_randomperm, caption, 
+                                       ncol = 1, 
+                                       rel_heights = c(1, 0.05)) # Adjust height proportions
+```
+
+#Save the randomperm
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("CpGCount_randomperm_refcpgs_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_unique_randomperm, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_gene_cpg_hetero_min015
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("CpGCount_hetero_Min015_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_gene_cpg_hetero_min015, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_gene_cpg_hetero_plus15
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("CpGCount_hetero_Plus015_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_gene_cpg_hetero_plus015, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_gene_cpg_homo_min03
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("CpGCount_homo_Min03_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_gene_cpg_homo_min03, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_gene_cpg_homo_plus03
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("CpGCount_homo_Plus03_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_gene_cpg_homo_plus03, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_groupbar_genomicregions
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("GenomicFeature_grouped_wperm_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_groupbar_genomicregions, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_hetero_min015
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("GenomicFeature_count_hetero_Min015", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_hetero_min015, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_hetero_plus015
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("GenomicFeature_count_hetero_Plus015", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_hetero_plus015, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_homo_min03
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("GenomicFeature_count_homo_Min03_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_homo_min03, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save plot_homo_plus03
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/Figures", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("GenomicFeature_count_homo_Plus03_", chromosome_number, ".png"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+ggsave(output_file, plot = plot_homo_plus03, width = 10, height = 7, dpi = 300)
+
+# Confirm the file was saved
+cat("Plot saved to:", output_file, "\n")
+```
+
+#Save unique_annotated_df_homo_plus03
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("unique_annotated_df_homo_plus03_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(unique_annotated_df_homo_plus03, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#Save unique_annotated_df_homo_min03
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("unique_annotated_df_homo_min03_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(unique_annotated_df_homo_min03, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#Save unique_annotated_df_hetero_min015
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("unique_annotated_df_hetero_min015_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(unique_annotated_df_hetero_min015, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#Save unique_annotated_df_hetero_plus015
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("unique_annotated_df_hetero_plus015_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(unique_annotated_df_hetero_plus015, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#hetero_plus015_SNPCpG_window 
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("hetero_plus015_SNPCpG_window_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(hetero_plus015_SNPCpG_window, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#hetero_min015_SNPCpG_window
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("hetero_min015_SNPCpG_window_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(hetero_min015_SNPCpG_window, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#homo_plus03_SNPCpG_window
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("homo_plus03_SNPCpG_window_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(homo_plus03_SNPCpG_window, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```
+
+#homo_min03_SNPCpG_window
+```{r}
+# Specify the directory and file name dynamically using the chromosome number
+output_directory <- file.path("C:/Users/danie/Documents/Medical_Epigenomics/Intership_Thesis/SNPCpG_data", 
+                              paste0("Chr", chromosome_number))
+output_file <- file.path(output_directory, paste0("homo_min03_SNPCpG_window_", chromosome_number, ".csv"))
+
+# Create the directory if it doesn't exist
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+# Save the plot
+write.csv(homo_min03_SNPCpG_window, output_file, row.names = FALSE)
+
+# Confirm the file was saved
+cat("Data saved to:", output_file, "\n")
+```

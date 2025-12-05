@@ -712,35 +712,6 @@ ggp
 ```
 
 
-
-## Biological vs Chronological Age
-
-
-```{r, fig.width=10, fig.height=5}
-ggp <- ggplot(data2plot) +
-  geom_point(aes(x = factor(.data$tested_variable, levels = c(
-    "Age", "Age.group",
-    "Age_pred_BLUP", "Age_acc_BLUP",
-    "Age_pred_Levine", "Age_acc_Levine")),
-                 y = .data$assay_name,
-                 size = .data$`Joint variation\nexplained by PCs`,
-                 col = .data$`Variable type`)) +
-  theme(
-    axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1)
-  ) +
-  scale_color_okabe_ito() +
-  ylab("Data set") +
-  xlab("Biological/technical variable") +
-  ggtitle("Significant associations between top 10\nPrincipal Components and variables")
-
-ggsave(
-  file.path("PCA_summary_Age.png"),
-  plot = ggp,
-  width = 23, height = 10.46, units = "cm", dpi = 300)
-
-ggp
-```
-
 ## Session information
 
 ```{r}

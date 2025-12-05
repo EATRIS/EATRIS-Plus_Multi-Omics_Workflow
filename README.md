@@ -6,11 +6,10 @@ Analysis workflow used to analyze the cohort of healthy blood donors
 
 ### Multi-omics data set from Zenodo
 - The data is stored in a Multi_Assay_Experiment object, which is used as input for the workflow
-- The object can be downloaded here: https://doi.org/10.5281/zenodo.10782800
+- The object can be downloaded here: https://doi.org/10.5281/zenodo.17514796
 
-- Note: The MuData (Python) version coming up soon
 
-###  Nextflow
+###  Install Nextflow using conda
 
  **Create a Conda Environment:** 
 ```bash
@@ -25,9 +24,9 @@ See also https://anaconda.org/bioconda/nextflow and https://docs.conda.io/projec
 
 For detailed Singularity installation instructions, please refer to the official [Singularity installation guide](https://docs.sylabs.io/guides/3.0/user-guide/installation.html).
 
+
 ### Software containers
 All software containers used in this workflow [can be obtained here](https://github.com/Xomics/Docker_containers) 
-
 
 
 # Execute Analysis Workflow
@@ -40,9 +39,11 @@ nextflow run main.nf --help
 The typical command to run the workflow is:
 ```
 nextflow run main.nf 
-	--output dir/of/choice
  	-c dre.config 
-	--config_file config.yml 
+	--config_file config.yml
+	--references references.bib 
 	--mae_object /dir/MAE_object
-	--container_dir /dir/Singularity/containers
+	--container_dir /dir/containers/
+	--output dir/of/choice
+	
 ```

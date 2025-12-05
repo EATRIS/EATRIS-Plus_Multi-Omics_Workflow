@@ -84,7 +84,7 @@ print(assay_names_df)
 ```{r}
 protein_mappings <- as.data.frame(rowData(mae[['Proteomics | imputed missing values']]))
 protein_ipp_mappings <- as.data.frame(rowData(mae[['Proteomics-IPP']]))
-mrna_mappings <- as.data.frame(rowData(mae[['mRNA-seq-2 | batch_adjusted | corrected']]))
+mrna_mappings <- as.data.frame(rowData(mae[['mRNA-seq-2 | batch-adjusted | corrected']]))
 lipid_mappings <- as.data.frame(rowData(mae[['Lipidomics, positive | transformed']]))
 ```
 
@@ -124,6 +124,8 @@ pheno_df <- data.frame(colData(mae))
 ```{r}
 source('ViolinPlot.R')
 source('PlotCor2.R')
+#source(params$color_theme)
+source('themes_and_colors.R')
 ```
 
 

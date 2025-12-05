@@ -431,18 +431,10 @@ lapply(1:5, function(f) {
 Add metadata for plotting results
 
 ```{r}
-require(dplyr)
-
 mofa_metadata <- as.data.frame(colData(mae)) %>%
-  rename(sample = subject.id) %>%
-  # mutate(Sex.PhenotypicFeature = paste(
-  #   as.character(Sex), 
-  #   ifelse(is.na(PhenotypicFeature), "", 
-  #          paste0("_", as.character(PhenotypicFeature))), 
-  #   sep = "")) %>%
-  select(c("sample", "Sex", "Age.group", "BMI.group", "Smoking.Status", 
+  select(c("subject.id", "Sex", "Age.group", "BMI.group", "Smoking.Status", 
            "ABO.Blood.Group", "Rh.Blood.Group", "Genomic_Abberation"))
-
+mofa_metadata$sample <- mofa_metadata$subject.id
 samples_metadata(MOFAobject.trained) <- mofa_metadata
 ```
 
@@ -547,110 +539,16 @@ ggp
 
 ### Distributions of sample factor scores per phenotype category
 
-#### Age
-
-```{r}
-plot_factor_category <- function(MOFAobject.trained, 
-                                 var, 
-                                 excluded_categories = c(),
-                                 num_factors = NULL,
-                                 first_factor = 1,
-                                 last_factor = 12,
-                                 legend_position = "none") {
-    
-  if (is.factor(MOFAobject.trained@samples_metadata[[var]])) {
-    original_categories <- levels(MOFAobject.trained@samples_metadata[[var]])
-  } else {
-    original_categories <- levels(
-      as.factor(MOFAobject.trained@samples_metadata[[var]]))
-  }
-  
-  categories <- original_categories[
-    !original_categories %in% excluded_categories]
-  if (length(categories) > 1) {
-    comparisons <- as.list(as.data.frame(combn(categories, 2)))
-  }
-  
-  num_factors <- ifelse(
-    is.null(num_factors),
-    nrow(MOFAobject.trained@cache$variance_explained$r2_per_factor[[1]]),
-    num_factors)
-  
-  ggp <- plot_factor(
-    MOFAobject.trained,
-    factor = first_factor:last_factor, # TODO
-    #factor = c(first_factor, last_factor),
-    color_by = var,
-    dodge = TRUE,
-    add_boxplot = TRUE) +
-    theme_bw() +
-    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
-          panel.spacing = unit(0, "lines"),
-          legend.position = legend_position) 
-  
-  ggp$data$group_by <- ggp$data$color_by
-  
-  add_stat <- TRUE
-  if (length(categories) > 2) {
-    # kruskal wallis
-    stat_method <- "Kruskal-Wallis"
-    stat_test <- ggp$data %>%
-      filter(!color_by %in% excluded_categories) %>%
-      group_by(factor) %>%
-      kruskal_test(value ~ group_by) %>%
-      adjust_pvalue(method = "fdr") 
-    
-    stat_test_pairwise <- ggp$data %>%
-      filter(!color_by %in% excluded_categories) %>%
-      group_by(factor) %>%
-      dunn_test(value ~ group_by, p.adjust.method = "fdr") %>%
-      add_y_position()
-  } else if (length(categories) == 2) {
-    # wilcoxon
-    stat_method <- "Wilcoxon"
-    stat_test <- stat_test_pairwise <- ggp$data %>%
-      group_by(factor) %>%
-      wilcox_test(value ~ group_by, comparisons = comparisons) %>%
-      adjust_pvalue(method = "fdr") %>%
-      add_significance() %>%
-      add_y_position()
-  } else {
-    add_stat <- FALSE
-  }
-  if (add_stat) {
-    test_label <- apply(stat_test, 1, function(row) {
-      paste0("p.adj=\n", scales::scientific(as.numeric(row[["p.adj"]]))) 
-    })
-    
-  
-  ggp <- ggp + 
-    stat_pvalue_manual(stat_test_pairwise, label = "p.adj.signif") +
-    labs(subtitle = stat_method)
-  
-  x.range <- ggplot_build(ggp)$layout$panel_params[[1]]$x.range
-  y.range <- ggplot_build(ggp)$layout$panel_params[[1]]$y.range
-  ggp <- ggp + 
-    geom_text(data = data.frame(factor = stat_test$factor), 
-              aes(x = x.range[1] + (x.range[2]-x.range[1])/2, 
-                  y = y.range[2] + 0.06*(y.range[2]-y.range[1]), 
-                  color = NULL, group = NULL, group_by = NULL), 
-              label = test_label, size = 3)
-  }
-  
-  ggp <- ggp + scale_fill_okabe_ito(
-    breaks = original_categories,
-    labels = original_categories)
-  ggp
-}
-```
-
-## Pick signficant differences for manuscript figure
+Pick signficant differences for manuscript figure
 ```{r}
 
 
-ggp_sex <- plot_factor_category(MOFAobject.trained, "Sex", first_factor =  1, last_factor = 6, legend_position = 'right')
-ggp_age <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  9, last_factor = 11 , legend_position = 'right')
-ggp_bmi <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  1, last_factor =  2, legend_position = 'right')
+ggp_sex <- plot_factor(MOFAobject.trained, color_by = "Sex", factors = c(1, 6), add_boxplot=T) + 
+  stat_compare_means(method = "wilcox.test", label = "p.signif")
+ggp_age <- plot_factor(MOFAobject.trained, color_by = "Age.group", factors = c(9, 11), add_boxplot=T) + 
+  stat_compare_means(method = "kruskal.test", label = "p.signif")
+ggp_bmi <- plot_factor(MOFAobject.trained, color_by = "BMI.group", factors=c(1, 2), add_boxplot=T) + 
+  stat_compare_means(method = "kruskal.test", label = "p.signif")
 
 grob1 <- ggplotGrob(ggp_sex)
 grob2 <- ggplotGrob(ggp_age)
@@ -662,115 +560,34 @@ dev.off()
 ```
 
 
-
+Age group
 ```{r, fig.width=16, fig.height=5}
-ggp <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  1, last_factor =  4)
-ggp2 <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  5, last_factor =  8)
-ggp3 <- plot_factor_category(MOFAobject.trained, "Age.group", first_factor =  9, last_factor =  12, legend_position = 'right')
-
-grob1 <- ggplotGrob(ggp)
-grob2 <- ggplotGrob(ggp2)
-grob3 <- ggplotGrob(ggp3)
-
-pdf("MOFA_factors_vs_Age.group.pdf", width = 13, height = 5)
-grid.arrange(grob1, grob2, grob3, ncol = 3, widths =c(1,1,1.3))
-dev.off()
+plot_factor(MOFAobject.trained, color_by = "Age.group", factors = c(1:12), add_boxplot=T)
 ```
 
-#### Sex
+Sex
 ```{r, fig.width=15, fig.height=5}
-if (config$sample_selection$include_MALE & 
-    config$sample_selection$include_FEMALE) {
-  
-  ggp <- plot(plot_factor_category(MOFAobject.trained, "Sex"))
-  
-  ggsave(file.path("MOFA_factors_vs_Sex.png"), 
-         ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-  
-  ggp
-}
+plot_factor(MOFAobject.trained, color_by = "Sex", factors = c(1:12), add_boxplot=T)
 ```
 
-
+Smoking status
 ```{r, fig.width=15, fig.height=5}
-if (config$sample_selection$include_MALE) {
-  
-  ggp <- plot_factor_category(MOFAobject.trained, "Sex", 
-                       first_factor =  1, last_factor =  4)
-  ggp2 <- plot_factor_category(MOFAobject.trained, "Sex", 
-                       first_factor =  5, last_factor =  8)
-  ggp3 <- plot_factor_category(MOFAobject.trained, "Sex", 
-                       first_factor =  9, last_factor =  12, legend_position = 'right')
-  
-  grob1 <- ggplotGrob(ggp)
-  grob2 <- ggplotGrob(ggp2)
-  grob3 <- ggplotGrob(ggp3)
-
-  pdf("MOFA_factors_vs_Sex.group.pdf", width = 13, height = 4)
-  grid.arrange(grob1, grob2, grob3, ncol = 3, widths =c(1,1,1.3))
-  dev.off()
-}
+plot_factor(MOFAobject.trained, color_by = "Smoking.Status", factors = c(1:12), add_boxplot=T)
 ```
 
-
-#### Smoking status
-
+BMI
 ```{r, fig.width=15, fig.height=5}
-ggp <- plot_factor_category(MOFAobject.trained, "Smoking.Status", 
-                            excluded_categories = c("Unknown If Ever Smoked"))
-ggsave(file.path("MOFA_factors_vs_Smoking.Status.png"), 
-       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-ggp
-```
-
-#### BMI
-
-#### Smoking status
-
-```{r, fig.width=15, fig.height=5}
-ggp <- plot_factor_category(MOFAobject.trained, "BMI.group")
-ggsave(file.path("MOFA_factors_vs_BMI.png"), 
-       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-ggp
-```
-
-```{r, fig.width=15, fig.height=5}
-ggp <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  1, last_factor =  4)
-ggp2 <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  5, last_factor =  8)
-ggp3 <- plot_factor_category(MOFAobject.trained, "BMI.group", first_factor =  9, last_factor =  12, legend_position = 'right')
-
-grob1 <- ggplotGrob(ggp)
-grob2 <- ggplotGrob(ggp2)
-grob3 <- ggplotGrob(ggp3)
-
-pdf("MOFA_factors_vs_BMI.group.pdf", width = 13, height = 4)
-grid.arrange(grob1, grob2, grob3, ncol = 3, widths =c(1,1,1.3))
-dev.off()
+plot_factor(MOFAobject.trained, color_by = "BMI.group", factors = c(1:12), add_boxplot=T)
 ```
 
 #### Blood group
 
 ```{r, fig.width=15, fig.height=5}
-ggp <- plot_factor_category(MOFAobject.trained, "ABO.Blood.Group")
-ggsave(file.path("MOFA_factors_vs_ABO.Blood.Group.png"), 
-       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-ggp
+plot_factor(MOFAobject.trained, color_by = "ABO.Blood.Group", factors = c(1:12), add_boxplot=T)
 ```
 
 ```{r, fig.width=15, fig.height=5}
-ggp <- plot_factor_category(MOFAobject.trained, "Rh.Blood.Group", first_factor = 1, last_factor = 12)
-ggsave(file.path("MOFA_factors_vs_Rh.Blood.Group.png"), 
-       ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-ggp
-```
-
-### Genomic abberations
- 
-```{r, fig.width=15, fig.height=5}
-# ggp <- plot_factor_category(MOFAobject.trained, "Genomic_Abberation")
-# ggsave(file.path("MOFA_factors_vs_Gene_Abberation.png"), 
-#        ggp, width = 28.04, height = 10.46, units = "cm", dpi = 300)
-# ggp
+plot_factor(MOFAobject.trained, color_by = "Rh.Blood.Group", factors = c(1:12))
 ```
 
 

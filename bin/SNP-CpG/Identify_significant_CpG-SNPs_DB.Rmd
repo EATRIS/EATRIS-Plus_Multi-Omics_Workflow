@@ -1,0 +1,167 @@
+---
+title: "Significant_SNPs"
+author: "Katerina"
+date: "2024-05-22"
+output: html_document
+---
+### Test set for chromosome 22 ###
+
+# Libraries
+```{r}
+library(vcfR)
+library(dplyr)
+library(ggplot2)
+library(purrr)
+```
+
+#File paths
+```{r}
+beta_gt_df_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/beta_gt_df", chromosome_number, ".csv")
+allele_gt_df_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/allele_gt_df", chromosome_number, ".csv")
+qc_filtered_beta_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/qc_filtered_beta", chromosome_number, ".csv")
+qc_filtered_gt_file_path <- paste0("Z:/omics/Methylation/Daniel_files/Outputs_SNP_CpG_DB/Chr", chromosome_number,"/qc_filtered_gt", chromosome_number, ".csv")
+```
+
+# Files
+```{r}
+beta_gt_df <- read.csv(beta_gt_df_file_path)
+allele_gt_df <- read.csv(allele_gt_df_file_path)
+qc_filtered_beta <- read.csv(qc_filtered_beta_file_path)
+qc_filtered_gt <- read.csv(qc_filtered_gt_file_path)
+filtered_samples <- read.csv("Z:/omics/Methylation/Daniel_files/filtered_samples.csv")
+```
+
+# Keep the statistically significant SNPs.
+# From the 9650 SNPs, 9387 were kept.
+```{r}
+# Replace all the genotypes with: 
+  # Homozygous for the reference allele: WT
+  # Heterozygous: Heter_alt
+  # Homozygous for the alternative allele: Homo_alt
+qc_filtered_gt <- replace(qc_filtered_gt, qc_filtered_gt == "0/0", "WT")
+qc_filtered_gt <- replace(qc_filtered_gt, qc_filtered_gt == "0/1" | qc_filtered_gt == "0/2" | qc_filtered_gt == "0/3", "Heter_alt")
+qc_filtered_gt <- replace(qc_filtered_gt, qc_filtered_gt == "1/1" | qc_filtered_gt == "1/2" | qc_filtered_gt == "1/3" | qc_filtered_gt == "2/1" | qc_filtered_gt == "2/2" | qc_filtered_gt == "2/3" | qc_filtered_gt == "3/1" | qc_filtered_gt == "3/2" | qc_filtered_gt == "3/3", "Homo_alt")
+
+# Delete the Ref_Alt genotype column.
+#This can give an error for chr22 as there is no column named "Ref_Alt" 
+qc_filtered_gt <- dplyr::select(qc_filtered_gt, -Ref_Alt)
+
+# Keep only the SNPs that remain after filtering.
+qc_filtered_gt <- qc_filtered_gt[qc_filtered_gt$POS %in% allele_gt_df$POS, ]
+qc_filtered_beta <- qc_filtered_beta[qc_filtered_beta$POS %in% allele_gt_df$POS, ]
+
+# Merge the beta values of the SNPs with their genotypes in text.
+beta_text_gt <- list()
+
+for (i in 1:nrow(qc_filtered_gt)) {
+  name <- qc_filtered_gt$POS[i]
+  matching_rows <- qc_filtered_beta[qc_filtered_beta$POS == name, ]
+  if (nrow(matching_rows) > 0) {
+  beta_text_gt[[i]] <- rbind(qc_filtered_gt[i, , drop = FALSE], matching_rows)
+  } else {
+  beta_text_gt[[i]] <- qc_filtered_gt[i, , drop = FALSE]
+  }
+}
+beta_text_gt_df <- do.call(rbind, beta_text_gt)
+rownames(beta_text_gt_df) <- NULL
+duplicated_pos <- duplicated(beta_text_gt_df$POS)
+beta_text_gt_df$POS[duplicated_pos] <- ""
+
+# Remove the NAs from the merged dataframe. 
+beta_text_gt_df <- na_if(beta_text_gt_df, NA)
+beta_text_gt_df[is.na(beta_text_gt_df)] <- ""
+
+### Change the dataframe into long format. 
+# Define a function that turns a snp into long format.
+
+gt <- beta_text_gt_df[19043, ]
+beta <- beta_text_gt_df[19043 + 1, ]
+
+
+long_format_snp <- 
+  function(beta_text_gt_df, gt, beta, filtered_samples) {
+  snp_data <- rbind(gt, beta)
+  snp_t <- t(snp_data)
+  snp_df <- as.data.frame(snp_t)
+  snp_df$Samples <- rownames(snp_df)
+  rownames(snp_df) <- NULL
+  colnames(snp_df) <- c("Alleles_Genotype", "Beta", "Samples")
+  snp_df <- snp_df %>% relocate (Samples, .before = Alleles_Genotype)
+  pos_column <- snp_df[1, 2]
+  snp_df$POS <- pos_column
+  snp_df <- snp_df[-1,]
+  rownames(snp_df) <- NULL
+  snp_df$POS[2:nrow(snp_df)] <- NA
+  snp_df <- na_if(snp_df, NA)
+  snp_df[is.na(snp_df)] <- ""
+  snp_pos <- snp_df$POS[1]
+  snp_df <- snp_df %>% dplyr::select(-POS)
+  snp_df <- snp_df %>% mutate(Beta = na_if(Beta, ""))
+  snp_df <- snp_df %>% filter(!is.na(Beta))
+  snp_df$Alleles_Genotype <- as.factor(snp_df$Alleles_Genotype)
+  snp_df$Beta <- as.numeric(snp_df$Beta)
+  snp_df$Alleles_Genotype <- with(snp_df, reorder(Alleles_Genotype, Beta, median, na.rm=T))
+  snp_df <- snp_df[snp_df$Samples %in% filtered_samples$Samples, ]
+  snp_df <- snp_df %>% dplyr::select(-Samples)
+  snp_df <- snp_df %>% mutate(POS = snp_pos, .before = "Alleles_Genotype")
+  return(snp_df)
+}
+
+#snps_long is a list of lists which have "POS", "Alleles_Genotype" and "Beta" columns.
+# Apply this function to the entire dataframe and save it in another dataframe. Example: snps_long[[1]]
+snps_long <- list()
+for (i in seq(1, nrow(beta_text_gt_df), by = 2)) {
+  gt <- beta_text_gt_df[i, ]
+  beta <- beta_text_gt_df[i + 1, ]
+  long_snp <- long_format_snp(beta_text_gt_df, gt, beta, filtered_samples)
+  snps_long[[i/2 + 1]] <- long_snp
+}
+
+beta_gt_df_long <- do.call(rbind, snps_long)
+rownames(beta_gt_df_long) <- NULL
+
+
+##Up to here everything seems to work fine for chromosome 22
+#Probably because we don't have any p values or p_adj values yet.
+# Define a function to perform ANOVA test.
+anova_for_snp <- function(beta_gt_df_long) {
+  aov_test <- aov(Beta ~ Alleles_Genotype, data = beta_gt_df_long)
+  anova_summary <- summary(aov_test)
+  p_value <- anova_summary[[1]]["Alleles_Genotype", "Pr(>F)"]
+  beta_gt_df_long %>% 
+    mutate(p_value = p_value)
+}
+
+# Apply this function to each SNP.
+beta_gt_df_long$POS <- as.numeric(beta_gt_df_long$POS)
+aov_results <- beta_gt_df_long %>% 
+  group_by(POS) %>% 
+  group_split() %>%
+  map(anova_for_snp)
+
+snp_p_values <- bind_rows(aov_results)  %>% 
+  distinct(POS, .keep_all = TRUE) %>% 
+  dplyr::select(-Alleles_Genotype, -Beta)
+
+# Adjust p-values for multiple testing correction using Benjamini-Hochberg method. 
+snp_p_adj_values <- snp_p_values %>% 
+  mutate(p_adjust = p.adjust(p_value, method = "BH"))
+
+# Keep the significant SNPs. 
+#There are no values below 0.05 in p_adjust column??? of the dataframe snp_p_adj_values
+significant_snps_mtc <- snp_p_adj_values %>% 
+  filter(p_adjust < 0.05)
+significant_snps_mtc <- na.omit(significant_snps_mtc)
+
+# Save the significant SNP positions.
+filtered_snps <- as.data.frame(significant_snps_mtc$POS)
+colnames(filtered_snps)  <- "POS"
+```
+
+
+#Save the significant SNP positions as csv file.
+```{r}
+write.csv(filtered_snps, "C:/Users/Daniel.Beisly/Documents/methylation_snp/Outputs_SNP_CpG_DB/filtered_snps13.csv", row.names = FALSE)
+```
+
+

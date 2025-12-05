@@ -1,0 +1,172 @@
+---
+title: "Proteomics_Somalogic"
+output: html_document
+params:
+  config_file: NULL
+  mae_hdf5_dir_path: NULL
+  rlm_sign_hits: NULL
+---
+
+## Params
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+```
+
+## Read input data 
+
+Input data is a MultiAssayExperiment (MAE) object. 
+```{r}
+library(MultiAssayExperiment)
+library(HDF5Array)
+
+mae <- loadHDF5MultiAssayExperiment(dir = params$mae_hdf5_dir_path, 
+                                     prefix = config$mae_hdf5_prefix)
+
+mae
+```
+
+Function to read data from MAE
+```{r}
+## Function to read omics data from MAE into a scaled dataframe
+## 
+## @param mae_object MultiAssayExperiment object
+## @param name_assay Name of omics data type
+## @return List of omics measurements
+read_omics_from_mae <- function(mae_object, name_assay){
+  se <- mae_object[[name_assay]]
+  df_wide <- data.frame(t(assay(se)))
+  df_wide <- df_wide[ , colSums(is.na(df_wide))==0]
+  df_wide
+}
+```
+
+## Read IPP data
+```{r}
+prot_data <- read_omics_from_mae(mae,  "Proteomics-IPP" )
+prot_data <- data.frame(t(prot_data))
+```
+
+### Feature metadata
+```{r}
+feature_metadata <- as.data.frame(rowData(mae[["Proteomics-IPP"]]))
+```
+
+## Replace by Uniprot IDss
+```{r}
+uniprot_ids <- lapply(colnames(prot_data), function(x) {
+  uni <- feature_metadata[feature_metadata$AptName==x, "UniProt"]
+  uni
+})
+colnames(prot_data) <- as.character(uniprot_ids)
+```
+
+
+
+
+## Load LC-MS-based proteomics data
+```{r}
+prot_ms_data <- read_omics_from_mae(mae,  "Proteomics | imputed missing values" )
+prot_ms_data <- data.frame(t(prot_ms_data))
+
+prot_ms_feature_metadata <- as.data.frame(rowData(mae[[ "Proteomics | imputed missing values"]]))
+```
+
+## Intersection of data platforms
+```{r}
+intersection <- intersect(colnames(prot_data), colnames(prot_ms_data))
+intersection
+```
+
+## Intersection of data platforms
+```{r}
+intersection_samples <- intersect(rownames(prot_data), rownames(prot_ms_data))
+intersection_samples
+```
+
+## Correlate intersections
+```{r}
+## Intersection of proteins
+prot_data_intersect <- prot_data[ ,intersection]
+prot_ms_data_intersect <- prot_ms_data[,intersection]
+
+## Same samples
+prot_ms_data_intersect <- prot_ms_data_intersect[rownames(prot_data_intersect),]
+
+## Same sample order
+prot_ms_data_intersect <- prot_ms_data_intersect[match(rownames(prot_data_intersect), rownames(prot_ms_data_intersect)),]
+```
+
+```{r}
+correlations <- sapply(names(prot_data_intersect), function(col) cor(prot_data_intersect[[col]], prot_ms_data_intersect[[col]]))
+df_correlations <- data.frame(colnames(prot_data_intersect), correlations)
+```
+
+```{r}
+library(ggplot2)
+ggp <- ggplot(data.frame(cor = correlations), aes(x=cor)) +
+  geom_histogram(binwidth = 0.025, fill = 'skyblue1', color = "black") +
+  ggtitle(paste0('Correlations between IPP and LC-MS proteomics\nn = ', length(correlations))) +
+  xlab("Correlation") + ylab('Overlapping protein count')
+
+ggsave("Proteomics_platforms_cor.pdf", ggp, width = 7, height = 4)
+```
+
+
+```{r}
+## Function to make correlation plot with complete observations
+cor_plot <- function(feature) {
+  
+  x <- prot_data_intersect[,feature]
+  y <- prot_ms_data_intersect[,feature]
+  
+  plot(x, y, 
+       main = feature,
+       xlab = 'SomaLogic', ylab= 'LC-MS')
+  model <- lm(y ~ x)
+  abline(model, col = "red", lwd =2)
+  r <- cor(x, y, use = "complete.obs")
+  legend("topleft", legend = paste("r = ", round(r,2)), bty = "n")
+  
+}
+```
+
+
+# Top 5 correlated proteins
+```{r}
+pdf("Proteomics_platforms_score_plots_top5.pdf")
+
+cor_plot('P01871')
+cor_plot("P00738")
+cor_plot('Q92496')
+cor_plot('P01833')
+cor_plot('P18428')
+
+dev.off()
+```
+
+
+# Linear models results
+
+## Read significant results
+```{r}
+mae_rlm_all_merged <- read.csv(params$rlm_sign_hits, row.names = 1)
+```
+
+## intersection
+```{r}
+mae_rlm_all_merged_intersection_prot <- mae_rlm_all_merged[mae_rlm_all_merged$feature %in% intersection,]
+mae_rlm_all_merged_intersection_prot
+```
+
+## Check overlap with IPP data
+```{r}
+proteomics_aging <- mae_rlm_all_merged[mae_rlm_all_merged$assay == 'Proteomics | imputed missing values',]
+proteomics_aging <- proteomics_aging[proteomics_aging$outcome == 'Age_acc_BLUP',]
+```
+
+
+

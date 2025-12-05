@@ -1,0 +1,114 @@
+---
+title: "Overview of measured samples"
+output: html_notebook
+params:
+  config_file: "config.yml"
+---
+
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$FEATURES
+#dir.create(outdir)
+```
+
+## Read input data 
+
+Input data is a MultiAssayExperiment (MAE) object. 
+```{r}
+library(MultiAssayExperiment)
+library(HDF5Array)
+
+mae <- loadHDF5MultiAssayExperiment(dir = config$mae_hdf5_dir_path, 
+                                     prefix = config$mae_hdf5_prefix)
+
+mae
+```
+
+
+## Get omics names list
+```{r}
+assay_names <- config$experiment_names$CV
+
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
+
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
+
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
+)
+
+print(assay_names_df)
+```
+
+
+```{r}
+samples_df <- read.csv(file.path(
+  "Z:/users/casper.devisser", 
+  "samples_overview.csv"), 
+  row.names = 1
+  )
+
+head(samples_df)
+```
+
+
+```{r}
+apply(samples_df, 2, sum)
+```
+
+
+```{r}
+upset(
+  samples_df,
+  intersect = names(samples_df),
+  mode = "inclusive_intersection",
+  name = "multi-omics",
+  min_degree = 2,
+  width_ratio = 0.3,
+  queries = list(
+    upset_query(name='q1', set='EM.seq', color = 'darkorange1', fill='darkorange1'),
+    upset_query(name='q2', set='aCGH', color = 'darkorange1', fill='darkorange1'),
+    upset_query(name='q3', set='mRNA.seq', fill='darkgreen', color='darkgreen'),
+    upset_query(name='q4', set='miRNA.seq', fill='darkgreen', color='darkgreen'),
+    upset_query(name='q5', set='miRNA.qRT.PCR', fill='darkturquoise', color='darkturquoise'),
+    upset_query(name='q6', set='Proteomics', fill='darkorchid4', color='darkorchid4'),
+    upset_query(name='q7', set='Proteomics.IPP', fill='darkorchid4', color='darkorchid4'),
+    upset_query(name='q8', set='Lipidomics.Set1', fill='darkorchid4', color='darkorchid4'),
+    upset_query(name='q9', set='Lipidomics.Set2', fill='darkorchid4', color='darkorchid4'),
+    upset_query(name='q10', set='Acylcarnitines', fill='darkorchid4', color='darkorchid4'),
+    upset_query(name='q11', set='Amino.acids', fill='darkorchid4', color='darkorchid4'),
+    upset_query(name='q12', set='Very.long.chain.fatty.acids', fill='darkorchid4', color='darkorchid4'),
+    upset_query(name='q13', set='WGS', fill='darkorange1', color='darkorange1')
+  ),
+  set_sizes = (
+    upset_set_size() +
+      geom_text(aes(label = ..count..), hjust = 1.1, stat = "count") +
+      expand_limits(y = 150)
+  ),
+  base_annotations = list(
+    'Intersection size' = intersection_size(
+      counts = TRUE, 
+      mode = 'inclusive_intersection'
+    )
+  )
+)
+
+ggsave('plot_samples_per_omics.pdf', dpi =600, width = 8)
+```

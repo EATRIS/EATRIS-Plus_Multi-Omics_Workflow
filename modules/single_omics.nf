@@ -41,6 +41,7 @@ process LINEAR_MODELS {
     
     output:
     path 'linear_models.html'
+    path 'rlm_signif_hits.csv'
 
     """
     cp -L $project_dir/bin/rlm_processed_data.Rmd rlm_processed_data.Rmd
@@ -99,13 +100,74 @@ process SINGLE_FEATURES {
     path mae_path, stageAs: 'mae_hdf5'
     path config_file
     path references
+    path rlm_signif_hits
     
     output:
     path 'single_features_results.html'
 
     """
     cp -L $project_dir/bin/analyze_single_features.Rmd analyze_single_features.Rmd
-    Rscript -e  "rmarkdown::render('analyze_single_features.Rmd', output_format = 'html_document', output_file = 'single_features_results.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}', references = '${references}'  ))"
+    cp -L $project_dir/SupportFunctions/ViolinPlot.R ViolinPlot.R
+    cp -L $project_dir/SupportFunctions/PlotCor2.R PlotCor2.R
+    cp -L $project_dir/SupportFunctions/themes_and_colors.R themes_and_colors.R
+    Rscript -e  "rmarkdown::render('analyze_single_features.Rmd', output_format = 'html_document', output_file = 'single_features_results.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}', references = '${references}', rlm_sign_hits = '${rlm_signif_hits}'  ))"
+    """
+    
+}
+
+
+process COMPARE_PROTEOMICS {
+
+    publishDir "${params.output}/PLATFORMS", mode: 'copy', overwrite: true
+
+    input:
+    path mae_path, stageAs: 'mae_hdf5'
+    path config_file
+    path rlm_signif_hits
+    
+    output:
+    path 'compare_prot_platforms.html'
+
+    """
+    cp -L $project_dir/bin/compare_proteomics_platforms.Rmd compare_proteomics_platforms.Rmd
+    Rscript -e  "rmarkdown::render('compare_proteomics_platforms.Rmd', output_format = 'html_document', output_file = 'compare_prot_platforms.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}', rlm_sign_hits = '${rlm_signif_hits}'  ))"
+    """
+}
+
+process COMPARE_LIPIDOMICS {
+
+    publishDir "${params.output}/PLATFORMS", mode: 'copy', overwrite: true
+
+    input:
+    path mae_path, stageAs: 'mae_hdf5'
+    path config_file
+    path rlm_signif_hits
+    
+    output:
+    path 'compare_lip_platforms.html'
+
+    """
+    cp -L $project_dir/bin/compare_lipidomics_platforms.Rmd compare_lipidomics_platforms.Rmd
+    Rscript -e  "rmarkdown::render('compare_lipidomics_platforms.Rmd', output_format = 'html_document', output_file = 'compare_lip_platforms.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}', rlm_sign_hits = '${rlm_signif_hits}'  ))"
+    """
+}
+
+
+process SAMPLES_PER_OMICS {
+
+    publishDir "${params.output}/STUDY_DESIGN", mode: 'copy', overwrite: true
+
+    input:
+    path mae_path, stageAs: 'mae_hdf5'
+    path config_file
+    
+    output:
+    path 'study_design.html'
+    path 'plot_samples_per_omics.png'
+
+    """
+    cp -L $project_dir/bin/plot_samples_per_omics.Rmd plot_samples_per_omics.Rmd
+    Rscript -e  "rmarkdown::render('plot_samples_per_omics.Rmd', output_format = 'html_document', output_file = 'study_design.html', params = list(mae_hdf5_dir_path = 'mae_hdf5', config_file = '${config_file}'))"
     """
     
 }
