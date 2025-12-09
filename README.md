@@ -45,5 +45,9 @@ nextflow run main.nf
 	--mae_object /dir/MAE_object
 	--container_dir /dir/containers/
 	--output dir/of/choice
-	
 ```
+
+
+## Run time
+This workflow was tested on a Linux environment with 16 CPU cores and 32 GB RAM available.
+For this hardware, the run times recorded for the individual Nextflow processes are documented [here](/RunTest/execution_trace_2025-12-05.txt)

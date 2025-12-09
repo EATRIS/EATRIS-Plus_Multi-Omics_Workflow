@@ -1,0 +1,7 @@
+task_id	name	process	status	exit	realtime	%cpu	cpus	container	rss
+1	SAMPLES_PER_OMICS	SAMPLES_PER_OMICS	COMPLETED	0	20.1s	52.1%	1	/mnt/data/software/singularity/mae_multiomics_v05.sif	529.2 MB
+2	CELLTYPE_LEVELS	CELLTYPE_LEVELS	COMPLETED	0	25.2s	64.5%	1	/mnt/data/software/singularity/mae_multiomics_v05.sif	920.7 MB
+3	RUN_CV	RUN_CV	COMPLETED	0	2m 27s	93.7%	2	/mnt/data/software/singularity/mae_multiomics_v05.sif	1.4 GB
+4	RUN_PCA	RUN_PCA	COMPLETED	0	11m 19s	104.1%	2	/mnt/data/software/singularity/mae_multiomics_v05.sif	3.2 GB
+5	RUN_PLS2	RUN_PLS2	COMPLETED	0	4m 12s	634.7%	2	/mnt/data/software/singularity/mae_multiomics_v05.sif	20.4 GB
+6	RUN_MOFA	RUN_MOFA	COMPLETED	0	12m 59s	538.0%	2	/mnt/data/software/singularity/mofa-mae-v6.sif	8.3 GB
