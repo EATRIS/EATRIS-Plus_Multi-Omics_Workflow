@@ -1,0 +1,996 @@
+---
+title: "Create MultiAssayExperiment object"
+output:
+  html_document:
+    df_print: paged
+bibliography: references.bib
+params:
+  phenotype_data: Z:/omics/Phenotype/phenotypes_from_phenopackets_2022-12-01.csv
+  
+  acylcarnitines_data: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_std/metabolomics_acylcarnitines_rumc_FIA-MS_positive__metabolite_profiling.csv
+  acylcarnitines_data_unscaled: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln/metabolomics_acylcarnitines_rumc_FIA-MS_positive__metabolite_profiling.csv
+  acylcarnitines_data_batchadjusted: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_ComBatCovSex_std/metabolomics_acylcarnitines_rumc_FIA-MS_positive__metabolite_profiling.csv
+  acylcarnitines_data_batchadjusted_imputed: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_ComBatCovSex_impLAR_std/metabolomics_acylcarnitines_rumc_FIA-MS_positive__metabolite_profiling.csv
+  acylcarnitines_sample_metadata: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/technical_parameters/metabolomics_acylcarnitines_rumc_FIA-MS_positive__metabolite_profiling.csv
+  acylcarnitines_feature_metadata: Z:/omics/MetabolomicsTargeted_RUMC/ISA_and_MAF_files_2023-02-15/m_metabolomics_acylcarnitines_rumc_FIA-MS_positive__metabolite_profiling_v2_maf.tsv
+  
+  aminoacids_data: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_std/metabolomics_aminoacids_mumc_LC-MS_positive_reverse-phase_metabolite_profiling.csv
+  aminoacids_data_unscaled: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln/metabolomics_aminoacids_mumc_LC-MS_positive_reverse-phase_metabolite_profiling.csv
+  aminoacids_data_batchadjusted: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_ComBatCovSex_std/metabolomics_aminoacids_mumc_LC-MS_positive_reverse-phase_metabolite_profiling.csv
+  aminoacids_data_batchadjusted_imputed: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_ComBatCovSex_impLAR_std/metabolomics_aminoacids_mumc_LC-MS_positive_reverse-phase_metabolite_profiling.csv
+  aminoacids_sample_metadata: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/technical_parameters/metabolomics_aminoacids_mumc_LC-MS_positive_reverse-phase_metabolite_profiling.csv
+  aminoacids_feature_metadata: Z:/omics/MetabolomicsTargeted_RUMC/ISA_and_MAF_files_2023-02-15/m_metabolomics_aminoacids_mumc_LC-MS_positive_reverse-phase_metabolite_profiling_v2_maf.tsv
+  
+  fattyacids_data: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_std/metabolomics_fattyacids_mumc_LC-MS_negative_reverse-phase_metabolite_profiling.csv
+  fattyacids_data_unscaled: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_std/metabolomics_fattyacids_mumc_LC-MS_negative_reverse-phase_metabolite_profiling.csv
+  fattyacids_data_batchadjusted: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/woQC_flt_ln_ComBatCovSex_std/metabolomics_fattyacids_mumc_LC-MS_negative_reverse-phase_metabolite_profiling.csv
+  fattyacids_sample_metadata: Z:/omics/MetabolomicsTargeted_RUMC/data_for_integration/technical_parameters/metabolomics_fattyacids_mumc_LC-MS_negative_reverse-phase_metabolite_profiling.csv
+  fattyacids_feature_metadata: Z:/omics/MetabolomicsTargeted_RUMC/ISA_and_MAF_files_2023-02-15/m_metabolomics_fattyacids_mumc_LC-MS_negative_reverse-phase_metabolite_profiling_v2_maf.tsv
+  
+  lipidomics_neg_data: Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_NEG_EATRIS_20220902_DataArea_Log.txt
+  lipidomics_neg_sample_metadata: Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_NEG_EATRIS_20220902_MetaDataSamples.txt
+  lipidomics_neg_feature_metadata: Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_NEG_EATRIS_20220902_MetaDataFeature.txt
+  lipidomics_pos_data: Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_POS_EATRIS_20220902_DataArea_Log.txt
+  lipidomics_pos_sample_metadata: Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_POS_EATRIS_20220902_MetaDataSamples.txt
+  lipidomics_pos_feature_metadata: Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_POS_EATRIS_20220902_MetaDataFeature.txt
+  
+  lipidomics_spline_pos_data: Z:/omics/LipidomicsUntargeted_IMTM/New_Data_2025/processed_data_EatrisSamples.csv
+  lipidomics_spline_sample_metadata: Z:/omics/LipidomicsUntargeted_IMTM/New_Data_2025/sample_metadata_EatrisSamples.csv
+  lipidomics_spline_feature_metadata: Z:/omics/LipidomicsUntargeted_IMTM/New_Data_2025/variable_metadata.csv
+  
+  proteomics_data: Z:/omics/Proteomics_IMTM/Upload_2023-03-03/proteins_multiomics_batchCorrected-ComBat-sex.txt
+  proteomics_data_unscaled: 
+  proteomics_data_imputed: Z:/omics/Proteomics_IMTM/Upload_2023-03-03/proteins_multiomics_batchCorrected-ComBat-sex_imputed.txt
+  proteomics_sample_metadata: Z:/omics/Proteomics_IMTM/Upload_2023-02-02/samples_annotation.txt
+  proteomics_feature_metadata: Z:/omics/Proteomics_IMTM/Upload_2023-02-02/proteins_annotation.txt
+  
+  proteomics_ipp_data: Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_log10_batchEffectRemoved_std.txt
+  proteomics_ipp_feature_metadata: Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_featureAnnotation.txt
+  proteomics_ipp_sample_metadata: Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_batchInfo.txt
+  
+  mRNAqRTPCR_data: Z:/omics/microRNAqRTPCR_SERMAS/Data_Integration/qPCR_miRNA_to_Integration.tsv
+  mRNAqRTPCR_sample_metadata: Z:/omics/microRNAqRTPCR_SERMAS/Analysis/QC_Hemolisis_data.tsv
+  
+  aCGH_data: Z:/omics/aCGH_IMTM/multi-omics-ready/aCGH_geneTable_aberrated_imputed_10-2025_116samples.csv
+  aCGH_sample_metadata: Z:/omics/aCGH_IMTM/multi-omics-ready/batch.txt
+  
+  miRNAseq_mature_data: Z:/omics/microRNAseq_FIMM/miRBase_mature/mature_normalized_CPM.txt
+  miRNAseq_mature_data_batchadjusted: Z:/omics/microRNAseq_FIMM/miRBase_mature/mature_Log_Combat_CovSex.csv
+  miRNAseq_mature_data_batchadjusted_celltypeadjusted: Z:/omics/microRNAseq_FIMM/miRBase_mature/mature_Log_Combat_CovSex_corrected.csv
+  miRNAseq_hairpin_data: Z:/omics/microRNAseq_FIMM/miRBase_hairpin/hairpin_normalized_CPM.txt
+  miRNAseq_sample_metadata: Z:/omics/microRNAseq_FIMM/metadata.csv
+  
+  mRNAseq_data: Z:/omics/mRNAseq_FIMM/normalized-cpm-count.tsv
+  mRNAseq_data_batchadjusted: Z:/omics/mRNAseq_FIMM/normalized-cpm-count_Combat_CovSex.csv
+  mRNAseq_data_batchadjusted_corrected: Z:/omics/mRNAseq_FIMM/normalized-cpm-count_Combat_CovSex_Log_corrected.csv
+  mRNAseq_data2_batchadjusted_vst: Z:/omics/mRNAseq_FIMM/raw_counts_Deseq_vst.csv
+  mRNAseq_data2_batchadjusted_vst_corrected: Z:/omics/mRNAseq_FIMM/raw_counts_Deseq_vst_corrected.csv
+  mRNAseq_sample_metadata: Z:/omics/mRNAseq_FIMM/metadata.tsv
+  mRNAseq_feature_metadata: Z:/omics/mRNAseq_FIMM/gene-annotation.tsv
+  mRNAseq_feature_metadata_vst: Z:/omics/mRNAseq_FIMM/mrna_vst_mapping.csv
+  
+  EMseq_SE_celltypeadjusted_random: Z:/omics/EM-seq_UU/filtered_datasets/adjusted_filtered_rand.RDS
+  EMseq_SE_celltypeadjusted_mostvariable: Z:/omics/EM-seq_UU/filtered_datasets/adjusted_filtered_sd.RDS
+  EMseq_SE_random: Z:/omics/EM-seq_UU/filtered_datasets/meth_filt_rand.RDS
+  EMseq_SE_mostvariable: Z:/omics/EM-seq_UU/filtered_datasets/meth_filt_sd.RDS
+  EMseq_Mvalues_celltypeadjusted_mostvariable: Z:/omics/EM-seq_UU/filtered_datasets/adjusted_filtered_sd_mval.RDS
+  EMseq_Mvalues_celltypeadjusted_random: Z:/omics/EM-seq_UU/filtered_datasets/adjusted_filtered_rand_M_val.RDS
+  
+  h5_outdir: h5MAE
+---
+
+This R notebook prepares an `MultiAssayExperiment` [@Ramos2017] object based on *CSV* files containing preprocessed omics measurements, corresponding omics feature metadata (annotations of molecular entities; database identifers), sample measurement metadata (e.g., measurement date), and sample phenotype information.
+
+
+```{r parameters}
+print(Sys.Date())
+print(params)
+```
+
+
+## Phenotype data
+
+Read phenotype information from CSV file.
+
+```{r read_phenotype_data}
+pheno_df <- read.csv(params$phenotype_data, stringsAsFactors = TRUE)
+row.names(pheno_df) <- pheno_df$subject.id
+cat("Column names of pheno_df:\n")
+print(names(pheno_df))
+cat("Dimensions of pheno_df:\n")
+dim(pheno_df)
+```
+
+Adjust order of factor levels for BMI and age.
+
+```{r define_phenotype_factor_levels}
+levels(pheno_df$BMI.group)
+pheno_df$BMI.group <- factor(
+  pheno_df$BMI.group, levels = c("healthy", "overweight", "obese"), 
+  ordered = TRUE)
+
+levels(pheno_df$Age.group)
+pheno_df$Age.group <- factor(
+  pheno_df$Age.group, levels = levels(pheno_df$Age.group), 
+  ordered = TRUE)
+
+age_pred <- readRDS('Z:/omics/EM-seq_UU/analysis/Age_prediction/age.RDS')
+
+
+BLUP_complete <- sapply(pheno_df$subject.id, function(x) {
+  if (x %in% age_pred$id) {
+    value <- age_pred[age_pred$id == x, 26]
+  }
+  else {
+    value <- NA
+  }
+  value
+})
+
+BLUP_ACC_complete <- sapply(pheno_df$subject.id, function(x) {
+  if (x %in% age_pred$id) {
+    value <- age_pred[age_pred$id == x, 27]
+  }
+  else {
+    value <- NA
+  }
+  value
+})
+
+Levin_complete <- sapply(pheno_df$subject.id, function(x) {
+  if (x %in% age_pred$id) {
+    value <- age_pred[age_pred$id == x, 10]
+  }
+  else {
+    value <- NA
+  }
+  value
+})
+
+Levin_acc_complete <- sapply(pheno_df$subject.id, function(x) {
+  if (x %in% age_pred$id) {
+    value <- age_pred[age_pred$id == x, 11]
+  }
+  else {
+    value <- NA
+  }
+  value
+})
+#rownames(age_pred) < age_pred$id
+pheno_df$Age_pred_BLUP <-BLUP_complete
+pheno_df$Age_acc_BLUP <- BLUP_ACC_complete
+pheno_df$Age_pred_Levine <-Levin_complete
+pheno_df$Age_acc_Levine <-Levin_acc_complete
+```
+
+## Create SummarizedExperiment per omics
+
+The R/Bioconductor package `MultiAssayExperiment` is based on `SummarizedExperiment` [@Morgan2022]. `SummarizedExperiment` provides a container for one or several assays performed on the same set of samples. Since sample sizes vary per omics in the EATRIS-Plus multi-omics demonstrator cohort. One `SummarizedExperiment` is created per assay. In addition to the omics profiles, the object contains metadata about features (`rowData`) and samples (`colData`). Metadata can be added to the entire object. We use this to provide a short summary of the applied data processing methods (filtering, batch effect adjustment, missing value imputation, normalization).
+
+The `SummarizedExperiment`s are collect in a `MultiAssayExperiment::ExperimentList`, which can be used in input for creating the `MultiAssayExperiment`.
+
+```{r}
+library(SummarizedExperiment)
+library(MultiAssayExperiment)
+library(HDF5Array)
+```
+
+
+### Metabolomics data and metadata
+
+Prepare several `SummarizedExperiment` objects for the targeted metabolomics assays (amino acids, acylcarnitines, very long chain fatty acids). 
+
+Names of experiments:
+
+| Assay | Data without batch-effect adjustment or missing value imputation | Batch-adjusted data | Batch-adjusted and missing value imputed |
+|-------|------------------------------------------------------------------|---------------------|------------------------------------------|
+| Acylcarnitines | `Acylcarnitines \| with missing values` | `Acylcarnitines \| batch-adjusted \| with missing values` | `Acylcarnitines \| batch-adjusted \| imputed missing values` |
+| Amino acids | `Amino acids \| with missing values` | `Amino acids \| batch-adjusted \| with missing values` | `Amino acids \| batch-adjusted \| imputed missing values` |
+| Very long chain fatty acids | `Very long chain fatty acids` | `Very long chain fatty acids \| batch-adjusted` | Not applicable (data has no missing values) |
+
+
+```{r prepare_metabolomics_experiments}
+experiment_list <- ExperimentList(
+  lapply(list(
+    
+    `Acylcarnitines | with missing values` = list(
+      assay_name = "Acylcarnitines | with missing values",
+      assay_data = params$acylcarnitines_data,
+      assay_sample_metadata = params$acylcarnitines_sample_metadata,
+      assay_feature_metadata = params$acylcarnitines_feature_metadata,
+      batch_effect_correction = "No batch effect adjustment",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Acylcarnitines | unscaled` = list(
+      assay_name = "Acylcarnitines | unscaled",
+      assay_data = params$acylcarnitines_data_unscaled,
+      assay_sample_metadata = params$acylcarnitines_sample_metadata,
+      assay_feature_metadata = params$acylcarnitines_feature_metadata,
+      batch_effect_correction = "No batch effect adjustment",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Amino acids | with missing values` = list(
+      assay_name = "Amino acids | with missing values",
+      assay_data = params$aminoacids_data,
+      assay_sample_metadata = params$aminoacids_sample_metadata,
+      assay_feature_metadata = params$aminoacids_feature_metadata,
+      batch_effect_correction = "No batch effect adjustment",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Amino acids | unscaled` = list(
+      assay_name = "Amino acids | unscaled",
+      assay_data = params$aminoacids_data_unscaled,
+      assay_sample_metadata = params$aminoacids_sample_metadata,
+      assay_feature_metadata = params$aminoacids_feature_metadata,
+      batch_effect_correction = "No batch effect adjustment",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Very long chain fatty acids` = list(
+      assay_name = "Very long chain fatty acids",
+      assay_data = params$fattyacids_data,
+      assay_sample_metadata = params$fattyacids_sample_metadata,
+      assay_feature_metadata = params$fattyacids_feature_metadata,
+      batch_effect_correction = "No batch effect adjustment",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Very long chain fatty acids | unscaled` = list(
+      assay_name = "Very long chain fatty acids | unscaled",
+      assay_data = params$fattyacids_data_unscaled,
+      assay_sample_metadata = params$fattyacids_sample_metadata,
+      assay_feature_metadata = params$fattyacids_feature_metadata,
+      batch_effect_correction = "No batch effect adjustment",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    # batch effect adjusted
+    `Acylcarnitines | batch-adjusted | with missing values` = list(
+      assay_name = "Acylcarnitines | batch-adjusted | with missing values",
+      assay_data = params$acylcarnitines_data_batchadjusted,
+      assay_sample_metadata = params$acylcarnitines_sample_metadata,
+      assay_feature_metadata = params$acylcarnitines_feature_metadata,
+      batch_effect_correction = "Batch effect adjustment was performed with ComBat using the parametric method. The variable 'Sex' was used as covariate",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Amino acids | batch-adjusted | with missing values` = list(
+      assay_name = "Amino acids | batch-adjusted | with missing values",
+      assay_data = params$aminoacids_data_batchadjusted,
+      assay_sample_metadata = params$aminoacids_sample_metadata,
+      assay_feature_metadata = params$aminoacids_feature_metadata,
+      batch_effect_correction = "Batch effect adjustment was performed with ComBat using the parametric method. The variable 'Sex' was used as covariate",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Very long chain fatty acids | batch-adjusted` = list(
+      assay_name = "Very long chain fatty acids | batch-adjusted",
+      assay_data = params$fattyacids_data_batchadjusted,
+      assay_sample_metadata = params$fattyacids_sample_metadata,
+      assay_feature_metadata = params$fattyacids_feature_metadata,
+      batch_effect_correction = "Batch effect adjustment was performed with ComBat using the parametric method. The variable 'Sex' was used as covariate",
+      missing_value_imputation = "Missing values were not imputed"),
+    
+    `Acylcarnitines | batch-adjusted | imputed missing values` = list(
+      assay_name = "Acylcarnitines | batch-adjusted | imputed missing values",
+      assay_data = params$acylcarnitines_data_batchadjusted_imputed,
+      assay_sample_metadata = params$acylcarnitines_sample_metadata,
+      assay_feature_metadata = params$acylcarnitines_feature_metadata,
+      batch_effect_correction = "Batch effect adjustment was performed with ComBat using the parametric method. The variable 'Sex' was used as covariate",
+      missing_value_imputation = "Low abundance resampling"),
+    
+    `Amino acids | batch-adjusted | imputed missing values` = list(
+      assay_name = "Amino acids | batch-adjusted | imputed missing values",
+      assay_data = params$aminoacids_data_batchadjusted_imputed,
+      assay_sample_metadata = params$aminoacids_sample_metadata,
+      assay_feature_metadata = params$aminoacids_feature_metadata,
+      batch_effect_correction = "Batch effect adjustment was performed with ComBat using the parametric method. The variable 'Sex' was used as covariate",
+      missing_value_imputation = "Low abundance resampling")
+    
+  ), function(a) {
+    # data
+    my_assay = read.csv(a$assay_data, row.names = 1)
+    my_assay_list <- list(my_assay)
+    names(my_assay_list) <- c(a$assay_name)
+    # sample metadata
+    sample_metadata <- read.csv(
+      a$assay_sample_metadata, stringsAsFactors = TRUE)
+    rownames(sample_metadata) <- sample_metadata$subject.id
+    sample_metadata <- sample_metadata[colnames(my_assay), ]
+    # feature metadata
+    feature_metadata <- read.delim(a$assay_feature_metadata)
+    rownames(feature_metadata) <- feature_metadata$metabolite_identification
+    selected_metadata_columns <- c(
+      "database_identifier", "metabolite_identification", "chemical_formula", 
+      "smiles", "inchi","database", "database_version", "uri", "HMDB.ID.s.", 
+      "Chebi.ID.s")
+    feature_names <- rownames(my_assay)
+    feature_metadata <- feature_metadata[
+      feature_names, 
+      intersect(names(feature_metadata), selected_metadata_columns)]
+    # SummarizedExperiment    
+    se <- SummarizedExperiment(
+      assays = my_assay_list,
+      # rows: features
+      rowData = feature_metadata, 
+      # columns: samples
+      colData = sample_metadata, 
+      # metadata about data processing
+      metadata = list(
+        filtering = "Features that are missing in more than 30% of the sample or in all samples or at least one of the measured batches were removed",
+        log_transformation = "Metabolite levels x [µM concentrations] were transformed using the natural logarithm: log(x+1)",
+        batch_effect_correction = a$batch_effect_correction,
+        missing_value_imputation = a$missing_value_imputation,
+        standardization = "All features were centered to mean = 0 and scaled to var = 1"
+      ),
+      checkDimnames = TRUE)
+  })
+)
+```
+
+
+### Lipidomics data and metadata
+
+Lipidomics profiles are not provided matrix-type format with sample IDs in columns following naming "CZC<4-digit-ID>". Sample renaming is required and performed below.
+
+Names of experiments:
+
+| Assay | Pre-processed data |
+|-------|--------------------|
+| Lipidomics, positive ion-mode | `Lipidomics, positive` |
+| Lipidomics, negative ion-mode | `Lipidomics, negative` |
+
+
+```{r prepare_lipidomics}
+lipidomics_experiments_list <- ExperimentList(
+  lapply(list(
+    `Lipidomics, positive | transformed` = list(
+      assay_name = "Lipidomics, positive | transformed",
+      assay_data = params$lipidomics_pos_data,
+      assay_sample_metadata = params$lipidomics_pos_sample_metadata,
+      assay_feature_metadata = params$lipidomics_pos_feature_metadata,
+      ion_mode = "postive"),
+    `Lipidomics, negative | transformed` = list(
+      assay_name = "Lipidomics, negative | transformed",
+      assay_data = params$lipidomics_neg_data,
+      assay_sample_metadata = params$lipidomics_neg_sample_metadata,
+      assay_feature_metadata = params$lipidomics_neg_feature_metadata,
+      ion_mode = "negative")
+  ), function(a) {
+    my_assay = read.csv(a$assay_data, row.names = 1)
+    cohort_samples <- colnames(my_assay)[grep("CZC", colnames(my_assay))]
+    my_assay <- my_assay[, cohort_samples]
+    my_assay_list <- list(my_assay)
+    names(my_assay_list) <- c(a$assay_name)
+    # sample metadata
+    sample_metadata <- read.delim(
+      a$assay_sample_metadata, stringsAsFactors = TRUE,
+      row.names = 1)
+    sample_metadata$subject.id <- rownames(sample_metadata)
+    sample_metadata <- sample_metadata[colnames(my_assay), ]
+    # feature metadata
+    feature_metadata <- read.delim(a$assay_feature_metadata, 
+                                   check.names = FALSE)
+    rownames(feature_metadata) <- feature_metadata$IMTM_Feature_ID
+    feature_names <- rownames(my_assay)
+    feature_metadata <- feature_metadata[
+      feature_names, ]
+    # SummarizedExperiment    
+    se <- SummarizedExperiment(
+      assays = my_assay_list,
+      # rows: features
+      rowData = feature_metadata, 
+      # columns: samples
+      colData = sample_metadata, 
+      # metadata about data processing
+      metadata = list(
+        filtering = paste0("Data processed in Compound Discoverer 3.3 SP1, filtered based on spectral matches agains LipidBlast library with score > 50;	only ", a$ion_mode, " ionisation mode"),
+        retention_time_alignment = "Retention time aligment",
+        grouping = "Compound detection and adduct grouping",
+        gap_filling = "Gap filling is performed applying 'Real Peak detection' with lower intensity setting",
+        background_substraction = "Background substration was performed based on 'Blank samples' with ration Max. Sample/Blank = 20",
+        normalization = "MAD (Median-Absolute-Deviation) Normalisation"
+      ),
+      checkDimnames = TRUE)
+  })
+)
+
+experiment_list <- append(experiment_list, lipidomics_experiments_list)
+
+stopifnot(!any(is.na(assays(lipidomics_experiments_list$`Lipidomics, positive`)[[1]])))
+stopifnot(!any(is.na(assays(lipidomics_experiments_list$`Lipidomics, negative`)[[1]])))
+# no missing values present
+```
+
+
+### Lipidomics SPLINE data and metadata
+
+
+```{r prepare_lipidomics-spline}
+lipidomics_experiments_list <- ExperimentList(
+  lapply(list(
+    `Lipidomics-SPLINE | positive` = list(
+      assay_name = "Lipidomics-SPLINE | positive",
+      assay_data = params$lipidomics_spline_pos_data,
+      assay_sample_metadata = params$lipidomics_spline_sample_metadata,
+      assay_feature_metadata = params$lipidomics_spline_feature_metadata,
+      ion_mode = "postive")
+  ), function(a) {
+    my_assay = read.csv(a$assay_data, row.names = 1)
+    my_assay <- data.frame(t(my_assay))
+    my_assay_list <- list(my_assay)
+    names(my_assay_list) <- c(a$assay_name)
+    # sample metadata
+    sample_metadata <- read.csv(
+      a$assay_sample_metadata, stringsAsFactors = TRUE,
+      row.names = 1)
+    sample_metadata$subject.id <- sample_metadata$EATRIS_IDs
+    rownames(sample_metadata) <- sample_metadata$subject.id
+    sample_metadata$EATRIS_IDs <- NULL
+    sample_metadata <- sample_metadata[colnames(my_assay),]
+    # feature metadata
+    feature_metadata <- read.csv(a$assay_feature_metadata, 
+                                   check.names = FALSE, 
+                                 row.names = 1)
+    feature_names <- rownames(my_assay)
+    feature_metadata <- feature_metadata[
+      feature_names, ]
+    # SummarizedExperiment    
+    se <- SummarizedExperiment(
+      assays = my_assay_list,
+      # rows: features
+      rowData = feature_metadata, 
+      # columns: samples
+      colData = sample_metadata, 
+      # metadata about data processing
+      checkDimnames = TRUE)
+  })
+)
+
+experiment_list <- append(experiment_list, lipidomics_experiments_list)
+```
+
+
+### Proteomics data and metadata
+
+Files and metadata were retrieved from `Z:/omics/Proteomics_IMTM/README.md`. 
+
+Names of experiments:
+
+| Assay | Batch-adjusted data | Batch-adjusted and missing value imputed |
+|-------|---------------------|------------------------------------------|
+| Proteomics | `Proteomics \| with missing values` |  `Proteomics \| imputed missing values` |
+
+
+```{r prepare_proteomics}
+
+proteomics_experiments <- lapply(list(
+  `Proteomics | with missing values` = list(
+    assay_name = "Proteomics | with missing values",
+    assay_data = params$proteomics_data,
+    assay_sample_metadata = params$proteomics_sample_metadata,
+    assay_feature_metadata = params$proteomics_feature_metadata,
+    missing_value_imputation = "Missing values were not imputed"),
+  
+  `Proteomics | imputed missing values` = list(
+    assay_name = "Proteomics | imputed missing values",
+    assay_data = params$proteomics_data_imputed,
+    assay_sample_metadata = params$proteomics_sample_metadata,
+    assay_feature_metadata = params$proteomics_feature_metadata,
+    missing_value_imputation = "Random forest (missForest)")
+  
+), function(a) {
+  # data
+  my_assay = read.delim(a$assay_data)
+  my_assay_list <- list(my_assay)
+  names(my_assay_list) <- c(a$assay_name)
+  
+  # sample metadata
+  sample_metadata <- read.delim(
+    a$assay_sample_metadata, row.names = "ID")
+  sample_metadata$subject.id <- factor(rownames(sample_metadata))
+  sample_metadata <- sample_metadata[colnames(my_assay), ]
+  # feature metadata
+  feature_metadata <- read.delim(a$assay_feature_metadata)
+  rownames(feature_metadata) <- feature_metadata$Accession
+  feature_names <- rownames(my_assay)
+  feature_metadata <- feature_metadata[feature_names, ]
+  
+  se <- SummarizedExperiment(
+    assays = my_assay_list,
+    # rows: features
+    rowData = feature_metadata, 
+    # columns: samples
+    colData = sample_metadata, 
+    # metadata about data processing
+    metadata = list(
+      filtering = "Proteins completely not quantified at least in one batch are filtered out. Proteins with low confidence are filtered out. Proteins with more than 30% of missing values are filtered out.",
+      log_transformation = "Protein levels were log2-transformed",
+      aggregation_of_technical_replicates = "Replicate measurements were aggregated by mean value",
+      batch_effect_correction = "Batch effect adjustment was performed with ComBat using the variable 'Sex' as covariate",
+      missing_value_imputation = a$missing_value_imputation,
+      standardization = "No standardization"
+    ),
+    checkDimnames = TRUE)
+})
+
+experiment_list <- append(experiment_list, proteomics_experiments)
+```
+
+
+
+### Proteomics IPP data and metadata
+
+Files and metadata were retrieved from `Z:/omics/Proteomics_IMTM/README.md`. 
+
+Names of experiments:
+
+```{r prepare_proteomics_ipp}
+
+proteomics_experiments <- lapply(list(
+  `Proteomics-IPP` = list(
+    assay_name = "Proteomics-IPP",
+    assay_data = params$proteomics_ipp_data,
+    assay_sample_metadata = params$proteomics_ipp_sample_metadata,
+    assay_feature_metadata = params$proteomics_ipp_feature_metadata)
+  
+), function(a) {
+  # data
+  my_assay = read.delim(a$assay_data)
+  my_assay_list <- list(my_assay)
+  names(my_assay_list) <- c(a$assay_name)
+  
+  # sample metadata
+  sample_metadata <- read.delim(
+    a$assay_sample_metadata, row.names = "CZCid")
+  sample_metadata$subject.id <- factor(rownames(sample_metadata))
+  sample_metadata <- sample_metadata[colnames(my_assay), ]
+  # feature metadata
+  feature_metadata <- read.delim(a$assay_feature_metadata)
+  rownames(feature_metadata) <- feature_metadata$AptName
+  feature_names <- rownames(my_assay)
+  feature_metadata <- feature_metadata[feature_names, ]
+  
+  se <- SummarizedExperiment(
+    assays = my_assay_list,
+    # rows: features
+    rowData = feature_metadata, 
+    # columns: samples
+    colData = sample_metadata, 
+    # metadata about data processing
+    checkDimnames = TRUE)
+})
+
+experiment_list <- append(experiment_list, proteomics_experiments)
+```
+
+
+
+### mRNA-seq data and metadata
+
+**NOTE:** processing seems to be incomplete. Batch effect adjusted should be performed.
+
+Sample IDs in columns do not follow the naming "CZC<4-digit-ID>". Sample renaming is required and performed below.
+
+Note that for mRNA-seq, `rowRanges` are used instead of `rowData` to report metadata on transcripts (genomic ranges).
+
+Names of experiments:
+
+| Assay | Normalized CPM counts | Normalized CPM counts, batch-adjusted |
+|-------|-----------------------|---------------------------------------|
+| mRNA-seq | `mRNA-seq` | `mRNA-seq | batch-adjusted` |
+
+```{r prepare_mRNAseq}
+
+mRNAseq_experiments <- lapply(list(
+  
+  `mRNA-seq-2 | batch-adjusted | vst` = list(
+    assay_name = "mRNAseq_data2_batchadjusted_VST",
+    assay_data = params$mRNAseq_data2_batchadjusted_vst,
+    assay_sample_metadata = params$mRNAseq_sample_metadata,
+    assay_feature_metadata = params$mRNAseq_feature_metadata
+  ),
+  `mRNA-seq-2 | batch-adjusted | vst | corrected` = list(
+    assay_name = "mRNAseq_data2_batchadjusted_vst_corrected",
+    assay_data = params$mRNAseq_data2_batchadjusted_vst_corrected,
+    assay_sample_metadata = params$mRNAseq_sample_metadata,
+    assay_feature_metadata = params$mRNAseq_feature_metadata
+  )
+
+), function(a) {
+  print(a)
+  # data
+  my_assay = read.csv(a$assay_data, row.names = 1)
+  my_assay = data.frame(my_assay)
+  measurement_names <- colnames(my_assay)
+  
+  # assure that subject IDs are now the same as in phenotype data
+  stopifnot(ncol(my_assay) == length(intersect(colnames(my_assay), 
+                                               rownames(pheno_df))))
+  my_assay_list <- list(my_assay)
+
+  # feature metadata
+  feature_metadata <- read.csv(params$mRNAseq_feature_metadata_vst)
+  rownames(feature_metadata) <- feature_metadata$Ensembl_ID
+  # sample metadata
+  sample_metadata <- read.delim(
+    params$mRNAseq_sample_metadata, row.names = "Sample")
+  rownames(sample_metadata) <- gsub("X", "CZC", rownames(sample_metadata))
+  sample_metadata$subject.id <- factor(rownames(sample_metadata))
+  sample_metadata <- sample_metadata[colnames(my_assay), ]
+  
+  se <- SummarizedExperiment(
+    assays = my_assay_list,
+    # rows: features
+    rowData = feature_metadata,
+    #rowRanges = grl, #RangedSummarizedExperiment
+    # columns: samples
+    colData = sample_metadata, 
+    # metadata about data processing
+    metadata = list("normalized CPM counts"),
+    checkDimnames = TRUE)
+  
+}  
+  
+)
+
+experiment_list <- append(experiment_list, mRNAseq_experiments)
+
+```
+
+
+### miRNA-seq data and metadata
+
+**NOTE:** processing seems to be incomplete. Batch effect adjusted should be performed.
+
+Sample IDs in columns do not follow the naming "CZC<4-digit-ID>". Sample renaming is required and performed below.
+
+Names of experiments:
+
+| Assay | Normalized CPM counts (mature miRNA) |  Normalized CPM counts (mature miRNA), batch-adjusted | Normalized CPM counts (hairpin miRNA) |
+|-------|--------------------------------------|-------------------------------------------------------|---------------------------------------|
+| miRNA-seq | `miRNA-seq, mature` | `miRNA-seq, mature | batch-adjusted` | `miRNA-seq, hairpin` |
+
+
+```{r prepare_miRNAseq}
+miRNAseq_experiments <- lapply(list(
+  `miRNA-seq, mature` = list(
+    assay_name = "miRNA-seq, mature",
+    assay_data = params$miRNAseq_mature_data,
+    assay_sample_metadata = params$miRNAseq_sample_metadata
+    # assay_feature_metadata = params$ # no file with feature metadata
+  ),
+  `miRNA-seq, mature | batch-adjusted` = list(
+    assay_name = "miRNA-seq, mature | batch-adjusted",
+    assay_data = params$miRNAseq_mature_data_batchadjusted,
+    assay_sample_metadata = params$miRNAseq_sample_metadata
+    # assay_feature_metadata = params$ # no file with feature metadata
+  ),
+  `miRNA-seq, mature | batch-adjusted | corrected` = list(
+    assay_name = "miRNA-seq, mature | batch-adjusted | corrected",
+    assay_data = params$miRNAseq_mature_data_batchadjusted_celltypeadjusted,
+    assay_sample_metadata = params$miRNAseq_sample_metadata
+    # assay_feature_metadata = params$ # no file with feature metadata
+  )
+  # ,
+  # `miRNA-seq, hairpin` = list(
+  #   assay_name = "miRNA-seq, hairpin",
+  #   assay_data = params$miRNAseq_hairpin_data,
+  #   assay_sample_metadata = params$miRNAseq_sample_metadata
+  #   # assay_feature_metadata = params$ # no file with feature metadata
+  # )
+), function(a) {
+  # data
+  if (grepl('corrected',  a$assay_name, fixed=TRUE)){
+    my_assay = read.csv(a$assay_data, row.names = 1)
+    my_assay = data.frame(my_assay)
+    measurement_names <- colnames(my_assay)
+  }
+  else if (grepl('batch-adjusted',  a$assay_name, fixed=TRUE)){
+    my_assay = t(read.csv(a$assay_data, row.names = 1))
+    my_assay = data.frame(my_assay)
+    measurement_names <- colnames(my_assay)
+  }
+  else {
+    my_assay = read.delim(a$assay_data, row.names = 1)  
+    measurement_names <- data.frame(
+    measurement.id = sub("X", "", colnames(my_assay)))
+    # columns are measurement names; replace by cohort subject ID
+    # names(my_assay) <- sapply(names(my_assay), function(colname) {
+    # subject.id <- paste0("CZC", substr(colname, 2, 5))
+    # # TODO: does the rest of the file name (e.g., 3818_S104_L002_R1_001.mature) 
+    # # contain any relevant sample/measurement metadata? 
+    # rownames(measurement_names) <- colnames(my_assay)
+    #})
+    colnames(my_assay) <- lapply(colnames(my_assay), function(x){
+      subjectid <- paste0("CZC", substr(x, 2, 5))
+    })
+  }
+  
+  
+  # assure that subject IDs are now the same as in phenotype data
+  stopifnot(ncol(my_assay) == length(intersect(colnames(my_assay), 
+                                               rownames(pheno_df))))
+  my_assay_list <- list(my_assay)
+  names(my_assay_list) <- c(a$assay_name)
+  # sample metadata
+  sample_metadata <- read.csv(
+    a$assay_sample_metadata, stringsAsFactors = TRUE)
+  rownames(sample_metadata) <- sapply(sample_metadata$Sample, function(s) {
+    paste0("CZC", s)
+  })
+  sample_metadata <- sample_metadata[colnames(my_assay), ]  
+  sample_metadata$subject.id <- rownames(sample_metadata)
+  sample_metadata <- cbind(sample_metadata, measurement_names)
+  sample_metadata <- sample_metadata[colnames(my_assay), 
+                                     !(names(sample_metadata) == "Sample")]
+  # feature metadata
+  # hsa-let-7f-5p_MIMAT0000067_Homo_sapiens_let-7f-5p
+  # hsa-miR-26a-5p_MIMAT0000082_Homo_sapiens_miR-26a-5p
+  feature_metadata <- do.call(
+    rbind, 
+    lapply(rownames(my_assay), function(feature.id) {
+      feature_list <- strsplit(feature.id, "_")
+      data.frame(
+        feature.id = feature.id,
+        miRBase.id = feature_list[[1]][1],
+        miRBase.accession = feature_list[[1]][2])
+    }))
+  rownames(feature_metadata) <- feature_metadata$feature.id
+
+  se <- SummarizedExperiment(
+    assays = my_assay_list,
+    # rows: features
+    rowData = feature_metadata, 
+    # columns: samples
+    colData = sample_metadata, 
+    # metadata about data processing
+    metadata = list(
+      preprocessing = "normalized count per million (CPM)"
+    ),
+    checkDimnames = TRUE)
+})
+
+experiment_list <- append(experiment_list, miRNAseq_experiments)
+```
+
+
+### miRNA qRT-PCR data and metadata
+
+**NOTE:** information about processing (metadata) needs to be added.
+
+| Assay | Processed data |
+|-------|----------------|
+| miRNA qRT-PCR profiling | `miRNA qRT-PCR` |
+
+```{r}
+my_assay_list = list(
+  `miRNA qRT-PCR` = read.delim(params$mRNAqRTPCR_data, row.names = "miRNA"))
+
+sample_metadata <- read.delim(params$mRNAqRTPCR_sample_metadata)
+sample_metadata <- sample_metadata[ !(is.na(sample_metadata$RT)),]
+rownames(sample_metadata) <- gsub("CZG", "CZC", sample_metadata$ID.Patient)
+sample_metadata <- sample_metadata[colnames(my_assay_list[[1]]), ] 
+
+
+se <- SummarizedExperiment(
+    assays = my_assay_list,
+    # # rows: features
+    # rowData = feature_metadata, 
+    # # columns: samples
+    colData = sample_metadata, 
+    # # metadata about data processing
+    # metadata = list(),
+    checkDimnames = TRUE)
+
+experiment_list <- append(experiment_list, list(`miRNA qRT-PCR` = se))
+```
+
+
+### aCGH data and metadata
+
+```{r}
+my_assay <- read.csv(params$aCGH_data, row.names = 1)
+
+my_assay_list = list(
+  `aCGH` = read.csv(params$aCGH_data, row.names = 1))
+
+se <- SummarizedExperiment(
+    assays = my_assay_list,
+    # # rows: features
+    #rowData = feature_metadata, 
+    # # columns: samples
+    #colData = sample_metadata, 
+    # # metadata about data processing
+    # metadata = list(),
+    checkDimnames = TRUE)
+
+experiment_list <- append(experiment_list, list(`aCGH` = se))
+```
+
+
+### EM-seq data and metadata
+
+Beta values are reported per CpG site. Multiple data set are provided based on selection of CpG sites and cell-type adjustment. See the README on EM-seq data processing for more information.
+
+**NOTE:** the input files need to be updated with the latest version of files. Check the README on EM-seq data processing from Reka.
+
+```{r prepare_EMseq}
+require(methrix)
+
+EMseq_data <- list(
+  # "methrix" - assay -> methylation (beta) and coverage (cov)
+  `EM-seq | 100,000 random CpG sites` = readRDS(params$EMseq_SE_random), 
+  `EM-seq | 100,000 most variable CpG sites` = readRDS(params$EMseq_SE_mostvariable),
+  # "matrix" "array" 
+  `EM-seq | cell-type adjusted | 100,000 random CpG sites` = readRDS(params$EMseq_SE_celltypeadjusted_random),
+  # "data.frame"
+  `EM-seq | cell-type adjusted | 100,000 most variable CpG sites` = readRDS(params$EMseq_SE_celltypeadjusted_mostvariable),
+  `EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites` = readRDS(params$EMseq_Mvalues_celltypeadjusted_mostvariable),
+  `EM-seq | M-values | cell-type adjusted | 100,000 random CpG sites` = readRDS(params$EMseq_Mvalues_celltypeadjusted_random)
+  )
+
+EMseq_experiments <- lapply(EMseq_data[1:2], function(x) {
+  # "methrix" - assay -> methylation (beta) and coverage (cov)
+  row_names <- apply(rowData(x), 1, function(row) {
+    paste0(row[["chr"]], "_", row[["start"]]) 
+  })
+  assay_list <- lapply(assays(x), function(a) {
+    rownames(a) <- row_names
+    a 
+  })
+  feature_metadata <- rowData(x)
+  rownames(feature_metadata) <- row_names
+  SummarizedExperiment(
+     assays = assay_list,
+    # rows: features
+    rowData = feature_metadata, 
+    # columns: samples
+    colData = colData(EMseq_data$`EM-seq | 100,000 random CpG sites`), 
+    # metadata about data processing
+    metadata = list(
+      cell_type_adjustment = "no cell type adjustment"),
+    checkDimnames = TRUE)
+})
+
+# # "matrix" "array" 
+# `EM-seq | cell-type adjusted | 100,000 random CpG sites` = readRDS(params$EMseq_SE_celltypeadjusted_random), 
+colnames(EMseq_data$`EM-seq | cell-type adjusted | 100,000 random CpG sites`) <- rownames(colData(EMseq_data$`EM-seq | 100,000 random CpG sites`))
+assay_list <- list(
+  `EM-seq | cell-type adjusted | 100,000 random CpG sites` = data.frame(
+    EMseq_data$`EM-seq | cell-type adjusted | 100,000 random CpG sites`)
+)
+feature_metadata <- data.frame(
+  chr = sapply(
+    rownames(EMseq_data$`EM-seq | cell-type adjusted | 100,000 random CpG sites`), 
+    function(x) {strsplit(x, "_")[[1]][1]}),
+  start = sapply(
+    rownames(EMseq_data$`EM-seq | cell-type adjusted | 100,000 random CpG sites`), 
+    function(x) {strsplit(x, "_")[[1]][2]}),
+  strand = "*"
+)
+EMseq_experiments$`EM-seq | cell-type adjusted | 100,000 random CpG sites` <- SummarizedExperiment(
+  assays = assay_list,
+  # rows: features
+  rowData = feature_metadata, 
+  # metadata about data processing
+  metadata = list(
+    cell_type_adjustment = "beta-values were adjusted for cell-type composition"),
+  checkDimnames = TRUE)
+
+# # "data.frame"
+# `EM-seq | cell-type adjusted | 100,000 most variable CpG sites` = readRDS(params$EMseq_SE_celltypeadjusted_mostvariable)
+assay_list <- list(
+  `EM-seq | cell-type adjusted | 100,000 most variable CpG sites` =
+    EMseq_data$`EM-seq | cell-type adjusted | 100,000 most variable CpG sites`
+)
+feature_metadata <- data.frame(
+  chr = sapply(
+    rownames(EMseq_data$`EM-seq | cell-type adjusted | 100,000 most variable CpG sites`),
+    function(x) {strsplit(x, "_")[[1]][1]}),
+  start = sapply(
+    rownames(EMseq_data$`EM-seq | cell-type adjusted | 100,000 most variable CpG sites`),
+    function(x) {strsplit(x, "_")[[1]][2]}),
+  strand = "*"
+)
+EMseq_experiments$`EM-seq | cell-type adjusted | 100,000 most variable CpG sites` <- SummarizedExperiment(
+  assays = assay_list,
+  # rows: features
+  rowData = feature_metadata,
+  # metadata about data processing
+  metadata = list(
+    cell_type_adjustment = "beta-values were adjusted for cell-type composition"),
+  checkDimnames = TRUE)
+
+
+
+# # "data.frame"
+# `EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites` = readRDS(params$EMseq_Mvalues_celltypeadjusted_mostvariable)
+# assay_list <- list(
+#   `EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites` =
+#     EMseq_data$`EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites`
+# )
+# feature_metadata <- data.frame(
+#   chr = sapply(
+#     rownames(EMseq_data$`EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites`),
+#     function(x) {strsplit(x, "_")[[1]][1]}),
+#   start = sapply(
+#     rownames(EMseq_data$`EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites`),
+#     function(x) {strsplit(x, "_")[[1]][2]}),
+#   strand = "*"
+# )
+# EMseq_experiments$`EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites` <- SummarizedExperiment(
+#   assays = assay_list,
+#   # rows: features
+#   rowData = feature_metadata,
+#   # metadata about data processing
+#   metadata = list(
+#     cell_type_adjustment = "beta-values were adjusted for cell-type composition"),
+#   checkDimnames = TRUE)
+
+
+
+# # "data.frame"
+# `EM-seq | M-values | cell-type adjusted | 100,000 most variable CpG sites` = readRDS(params$EMseq_Mvalues_celltypeadjusted_mostvariable)
+# assay_list <- list(
+#   `EM-seq | M-values | cell-type adjusted | 100,000 random CpG sites` =
+#     EMseq_data$`EM-seq | M-values | cell-type adjusted | 100,000 random CpG sites`
+# )
+# feature_metadata <- data.frame(
+#   chr = sapply(
+#     rownames(EMseq_data$`EM-seq | M-values | cell-type adjusted | 100,000 random CpG sites`),
+#     function(x) {strsplit(x, "_")[[1]][1]}),
+#   start = sapply(
+#     rownames(EMseq_data$`EM-seq | M-values | cell-type adjusted | 100,000 random CpG sites`),
+#     function(x) {strsplit(x, "_")[[1]][2]}),
+#   strand = "*"
+# )
+# EMseq_experiments$`EM-seq | M-values | cell-type adjusted | 100,000 random CpG sites` <- SummarizedExperiment(
+#   assays = assay_list,
+#   # rows: features
+#   rowData = feature_metadata,
+#   # metadata about data processing
+#   metadata = list(
+#     cell_type_adjustment = "beta-values were adjusted for cell-type composition"),
+#   checkDimnames = TRUE)
+
+
+experiment_list <- append(experiment_list, EMseq_experiments)
+```
+
+
+## Create MultiAssayExperiment
+
+The `SummarizedExperiment`s are now added to a `MultiAssayExperiment`. In addition to the `ExperimentList`, phenotype information on individuals is added (colData). General metadata about the cohort can be added here.
+
+```{r create_multiassayexperiment}
+mae <- MultiAssayExperiment(
+  experiments = experiment_list,
+  colData = pheno_df,
+  metadata = list(
+    description = "Multi-omics data of EATRIS-Plus healthy Czech demonstrator cohort"
+  )
+)
+
+mae
+```
+
+
+## Remove mixup samples
+```{r}
+sample_names <- rownames(colData(mae))
+sample_names_NoMixup <- sample_names[!sample_names %in% c("CZC2898", "CZC2935")]
+
+mae <- subsetByColData(mae, y = sample_names_NoMixup)
+mae
+```  
+
+Save MultiAssayExperiment to HDF5 file.
+
+```{r save_multiassayexperiment}
+saveHDF5MultiAssayExperiment(mae, dir = params$h5_outdir, replace = TRUE)
+```
+
+
+## Session information
+
+```{r session_info}
+sessionInfo()
+```
+
+## References

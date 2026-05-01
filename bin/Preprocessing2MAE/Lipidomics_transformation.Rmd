@@ -1,0 +1,35 @@
+---
+title: "Lipidomics_transformation"
+output: html_document
+---
+
+```{r}
+lipidomics_neg_path <- 'Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_NEG_EATRIS_20220902_DataArea.txt'
+lipidomics_pos_path <- 'Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_POS_EATRIS_20220902_DataArea.txt'
+
+lipidomics_pos_data <- data.frame(t(read.delim(lipidomics_pos_path, row.names = 1)))
+lipidomics_neg_data <- data.frame(t(read.delim(lipidomics_neg_path, row.names = 1)))
+
+sample_names <- rownames(lipidomics_neg_data) 
+```
+
+## Log transformation
+
+```{r Log transformation}
+lipidomics_pos_data <- data.frame(lapply(lipidomics_pos_data, function(x) {log(x+1)}))
+lipidomics_neg_data <- data.frame(lapply(lipidomics_neg_data, function(x) {log(x+1)}))
+
+lipidomics_neg_data <- data.frame(t(lipidomics_neg_data))
+lipidomics_pos_data <- data.frame(t(lipidomics_pos_data))
+
+colnames(lipidomics_neg_data) <- sample_names
+colnames(lipidomics_pos_data) <- sample_names
+```
+
+## Write to CSV
+
+```{r}
+write.csv(lipidomics_neg_data, 'Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_NEG_EATRIS_20220902_DataArea_Log.csv')
+write.csv(lipidomics_pos_data, 'Z:/omics/LipidomicsUntargeted_IMTM/Untargeted_Lipidomics_IMTM_LN_PutativelyAnnotatedOnly_POS_EATRIS_20220902_DataArea_Log.csv')
+```
+

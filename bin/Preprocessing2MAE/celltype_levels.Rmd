@@ -1,0 +1,100 @@
+---
+title: 'Cell type levels, males vs. females'
+author:
+  - Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+bibliography: references.bib
+params:
+  config_file: "config.yml"
+---
+
+## Read data and metadata: MultiAssayExperiment
+
+The `MultiAssayExperiment` [@Ramos2017] contains preprocessed data and has been created with the *R* notebook `examples\create_MultiAssayExperiment.Rmd`.
+
+```{r read_multiassayexperiment}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$PCA
+dir.create(outdir)
+```
+
+
+
+```{r}
+require(SummarizedExperiment)
+library(MultiAssayExperiment)
+
+
+mae <- loadHDF5MultiAssayExperiment(
+  dir = config$mae_hdf5_dir_path, 
+  prefix = config$mae_hdf5_prefix)
+#mae
+```
+
+
+```{r}
+# extract names of experiments
+experiment_names <- config$experiment_names$PCA
+names(experiment_names) <- experiment_names
+
+# # exclude experiments that contain missing data
+# experiment_names <- experiment_names[
+#   !sapply(strsplit(experiment_names, " | ", fixed = T), function(n) {
+#     "with missing values" %in% n })]
+
+#experiment_names
+
+# make sure that there are no missing values
+stopifnot(sapply(experiment_names, function(n) {
+  !any(is.na(assays(mae[[n]])[[1]]))
+}))
+```
+
+
+
+## Box plots
+```{r pca_box_plots, results='asis'}
+library(ggpubr)
+
+
+pheno_df <- as.data.frame(colData(mae))
+
+bio_vars_continuous <- c(
+  "Age",
+  "Height",
+  "Weight",
+  "BMI",
+  "Leukocytes",
+  "Erythrocytes",
+  "Hemoglobin",
+  "Hematocrit",
+  "Platelets",
+  "MCV",
+  "MCH",
+  "MCHC",
+  "Lymphocytes",
+  "MXD",
+  "Neutrophils",
+  "Age_pred_BLUP", 
+  "Age_acc_BLUP",
+  "Age_pred_Levine", 
+  "Age_acc_Levine")
+
+
+boxplot <- lapply(bio_vars_continuous, function(var) {
+  ggp <- ggboxplot(pheno_df, x = 'Sex', y = var,
+                 color = 'Sex', palette = c("#CC79A7", "#0072B2"),
+                 add = 'jitter') + 
+    ggtitle(paste(var))
+  
+})
+
+boxplot
+```

@@ -1,0 +1,254 @@
+---
+title: 'Perform miRNA data preprocessing (batch correction)'
+author:
+- Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### File paths
+```{r}
+microRNA_df_path <- 'Z:/omics/microRNAseq_FIMM/miRBase_mature/mature_logtpm.csv'
+microRNA_metadata_path <- 'Z:/omics/microRNAseq_FIMM/metadata.csv'
+phenotype_file <- "Z:/omics/Phenotype/phenotypes_from_phenopackets_2022-12-01.csv"
+```
+
+
+### Read microRNA data 
+
+```{r}
+microRNA_df = read.csv(microRNA_df_path, row.names = 1)
+measurement_names <- data.frame(
+  measurement.id = sub("X", "", colnames(microRNA_df)))
+  # columns are measurement names; replace by cohort subject ID
+rownames(microRNA_df) <- lapply(rownames(microRNA_df), function(colname) {
+   subject.id <- paste0("CZC", substr(colname, 1, 4))
+ })
+microRNA_df <- data.frame(t(microRNA_df))
+```
+
+## Read metadata
+
+```{r}
+microRNA_metadata_df <- read.csv(microRNA_metadata_path, stringsAsFactors = TRUE)
+microRNA_metadata_df$Batch <- as.factor(microRNA_metadata_df$Batch)
+rownames(microRNA_metadata_df) <- sapply(microRNA_metadata_df$Sample, function(s) {
+    paste0("CZC", s) 
+  })
+```
+
+### Sample in batch 6 is not included in Combat (as this it is not possible to have batch with one sample)
+```{r}
+sample_not_included <- rownames(microRNA_metadata_df[microRNA_metadata_df$Batch==6,])
+microRNA_combat <- microRNA_df
+microRNA_combat[sample_not_included] <- NULL
+
+# Subset of metadata without batch 6
+microRNA_metadata_combat <- microRNA_metadata_df[colnames(microRNA_combat), ]
+```
+
+### Phenotype data
+
+Read phenotype information from Phenopackets json file.
+
+```{r}
+pheno_df <- read.csv(phenotype_file)
+row.names(pheno_df) <- pheno_df$subject.id
+cat("Column names of pheno_df")
+print(names(pheno_df))
+cat("Dimensions of pheno_df")
+dim(pheno_df)
+```
+
+Convert selected columns to factor
+
+```{r}
+pheno_factor_columns <- c("subject.id", "Sex", "Smoking.Status", 
+                          "ABO.Blood.Group", "Rh.Blood.Group", 
+                          "PhenotypicFeature", "Age.group", "BMI.group")
+pheno_df[, pheno_factor_columns] <- lapply(
+  pheno_df[, pheno_factor_columns], factor)
+pheno_df$BMI.group <- factor(
+  pheno_df$BMI.group, levels = c("healthy", "overweight", "obese"), 
+  ordered = TRUE)
+```
+
+Remove samples that are not in mRNA data
+
+```{r}
+pheno_df <- pheno_df[colnames(microRNA_df), ]
+pheno_df_combat <- pheno_df[colnames(microRNA_combat), ] #Without batch 6 
+```
+
+
+## Batch effect correction with Combat
+```{r}
+library(sva)
+citation("sva")
+```
+
+
+```{r}
+run_combat <- function(input_df, metadata_df, parametric = TRUE, 
+                       include_covariate = FALSE) {
+  unadjusted <- input_df
+  print(dim(unadjusted))
+  sample_names <- colnames(input_df)
+  tech_var <- metadata_df[sample_names, ]
+  batch <- as.factor(tech_var[sample_names, ][["Batch"]])
+  bio_var <- pheno_df[sample_names, c("Sex", "Age")]
+  
+  if (include_covariate) {
+    mod <- model.matrix(~Sex, data = bio_var)
+  } else {
+    mod <- NULL
+  }
+  
+  # how many male/female samples per batch?
+  print(table(data.frame( 
+    Measurement.date = tech_var$Batch, Sex = bio_var$Sex )))
+  
+  # without sex as covariate
+  combat_adjusted <- ComBat( # _nosex_par
+    dat = unadjusted,
+    batch = batch,
+    mod = NULL, # without sex as covariate
+    par.prior = parametric, # parametric adjustment
+    prior.plots = TRUE,
+    mean.only = FALSE
+  )
+  
+  as.data.frame(t(combat_adjusted))
+}
+```
+
+## Including Plots
+
+```{r}
+cat("non-parametric / sex as covariate\n")
+microRNA_combatCovSex <- run_combat(microRNA_combat, droplevels(microRNA_metadata_combat),  parametric = TRUE, include_covariate = TRUE)
+```
+
+
+## Add sample from batch 6 to batch-adjusted data
+
+```{r}
+microRNA_combatCovSex <- data.frame(t(microRNA_combatCovSex))
+microRNA_combatCovSex[sample_not_included] <- microRNA_df[sample_not_included]
+microRNA_combatCovSex <- data.frame(t(microRNA_combatCovSex))
+```
+
+#### Visualize data before and after batch effect correction
+
+Principal Component Analysis score plot
+
+```{r}
+library(ggokabeito) # Okabe-Ito color palette
+library(ggplot2)
+library(stringr)
+```
+
+```{r}
+num_PCs <- 5
+
+data_list <- list(
+  `Unadjusted` = t(microRNA_df),
+  `ComBat-adjusted, parametric, sex as covariate` = microRNA_combatCovSex)
+  
+# run PCA and combine data for plots
+plot_data <- do.call(rbind, lapply(names(data_list), function(adjustmethod) { df <- data_list[[adjustmethod]]
+  # exclude features with missing values from PCA
+  df <- df[, apply(df, 2, function(col) {!any(is.na(col))})]
+  # perform PCA
+  pca <- prcomp(df, center = TRUE, scale = TRUE)
+  # PCA scores 
+  pca_scores <- as.data.frame(pca$x[, 1:num_PCs])
+  # add additional variables needed for plotting - batch, sex
+  pca_scores$method <- as.factor(adjustmethod)
+    pca_scores$Sex <- sapply(
+    rownames(pca_scores), function(row_name) {
+      pheno_df[row_name, "Sex"]})
+  pca_scores$Batch <- sapply(
+    rownames(pca_scores), function(row_name) {
+      microRNA_metadata_df[row_name, "Batch"]})
+  pca_scores
+  }))
+  
+#plot PCA scores, solor by measurement date
+ggp_batch <- ggplot(
+  plot_data, 
+  aes(x = PC1, y = PC2, 
+      col = Batch, shape = Batch)) +
+  geom_point() +
+  stat_ellipse() +
+  facet_wrap(.~method) +
+  scale_color_okabe_ito() +
+  ggtitle("PCA score plot, before/after batch-effect correction")
+
+# plot PCA scores, solor by measurement sex
+ggp_sex <- ggplot(
+  plot_data, 
+  aes(x = PC1, y = PC2, col = Sex, shape = Sex)) +
+  geom_point() +
+  stat_ellipse() +
+  facet_wrap(.~method) +
+  scale_color_okabe_ito() +
+  ggtitle("PCA score plot, before/after batch-effect correction")
+
+list(ggp_batch, ggp_sex)
+```
+
+## Same plot with different package shows all samples
+
+### Original data
+
+```{r}
+
+library(ggfortify)
+
+# perform PCA
+df <- data_list[[1]]
+df <- data.frame(df)
+pca <- prcomp(df, center = TRUE, scale = TRUE)
+# PCA scores 
+df$Batch <- microRNA_metadata_df$Batch
+autoplot(pca, data = df, colour = 'Batch', frame =TRUE, frame.colour='Batch')
+``` 
+
+### Batch-adjusted data
+
+```{r}
+
+library(ggfortify)
+
+# perform PCA
+df <- data_list[[2]]
+df <- data.frame(df)
+pca <- prcomp(df, center = TRUE, scale = TRUE)
+# PCA scores 
+df$Batch <- microRNA_metadata_df$Batch
+autoplot(pca, data = df, colour = 'Batch', frame =TRUE, frame.colour='Batch')
+``` 
+
+
+PCA suggests the sample in batch 6 is an outlier. Perhaps because it has not been treated with Combat.
+Therefore it is removed from the dataframe:
+
+```{r}
+microRNA_combatCovSex <- data.frame(t(microRNA_combatCovSex))
+microRNA_combatCovSex[sample_not_included] <- NULL
+microRNA_combatCovSex <- data.frame(t(microRNA_combatCovSex))
+```
+
+
+## Save batch corrected data to csv
+```{r}
+write.csv(microRNA_combatCovSex, 'Z:/omics/microRNAseq_FIMM/miRBase_mature/mature_Log_Combat_CovSex.csv')
+```

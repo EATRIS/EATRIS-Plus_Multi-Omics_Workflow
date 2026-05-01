@@ -1,0 +1,59 @@
+---
+title: "Proteomics_Somalogic"
+output: html_document
+params:
+  proteomics_ipp_data: 'Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_log10_batchEffectRemoved_std.txt'
+  proteomics_ipp_feature_data: 'Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_featureAnnotation.txt'
+  
+  proteomics_ms_data: 'Z:/omics/Proteomics_IMTM/Upload_2023-03-03/proteins_multiomics_batchCorrected-ComBat-sex_imputed.txt'
+  proteomic_ms_feature_data: 'Z:/omics/Proteomics_IMTM/Upload_2023-02-02/proteins_annotation.txt'
+  
+  outdir: "Z:/Results/2025_July_Rebuttal/"
+---
+
+## Params
+```{r}
+print(params)
+outdir <- params$outdir
+```
+
+## Read IPP data
+```{r}
+prot_data <- read.delim(params$proteomics_ipp_data)
+prot_data <- data.frame(t(prot_data))
+```
+
+### Feature metadata
+```{r}
+feature_metadata <- read.delim(params$proteomics_ipp_feature_data)
+```
+
+## Replace by Uniprot IDss
+```{r}
+uniprot_ids <- lapply(colnames(prot_data), function(x) {
+  uni <- feature_metadata[feature_metadata$AptName==x, "UniProt"]
+  uni
+})
+colnames(prot_data) <- as.character(uniprot_ids)
+```
+
+## Histogram
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+df_long <- prot_data %>%
+  pivot_longer(cols = where(is.numeric)) %>%
+  drop_na()
+
+ggplot(df_long, aes(value)) +
+  geom_histogram(bins = 30, fill = 'grey', color = 'black')
+```
+
+
+## Save for MAE object
+```{r}
+prot_data_out <- data.frame(t(prot_data))
+write.csv(prot_data_out, 'Z:/omics/Proteomics_IMTM/Upload_2025-05-22_IPP/IPP_log10_batchEffectRemoved_std_UniProt.csv')
+```

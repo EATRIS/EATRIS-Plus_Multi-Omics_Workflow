@@ -1,0 +1,87 @@
+---
+title: "microRNA-seq_celltype_adjustment"
+author:
+   - Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output: html_document
+params:
+    miRNAseq_mature_data_batchadjusted: Z:/omics/microRNAseq_FIMM/miRBase_mature/mature_Log_Combat_CovSex.csv
+    estimated_cell_proportions: Z:/omics/mRNAseq_FIMM/estimated_cell_proportions.csv
+---
+
+### Read miRNA data
+```{r}
+microRNA_data = t(read.csv(params$miRNAseq_mature_data_batchadjusted, row.names = 1))
+microRNA_data = data.frame(microRNA_data)
+```
+
+
+## Read csv file containing estimated cell type proportions
+```{r}
+#estimated_cell_proportions <- read.csv('Z:/omics/mRNAseq_FIMM/estimated_cell_proportions.csv', row.names = 1)
+estimated_cell_proportions <- readRDS('Z:/omics/EM-seq_UU/analysis/scripts/cell_type_composition.RDS')
+
+# Remove erythrocyte column
+estimated_cell_proportions <- data.frame(estimated_cell_proportions[, 2:15])
+
+# Subset celltype proportion dataframe on Sample names
+estimated_cell_proportions <- estimated_cell_proportions[colnames(microRNA_data),]
+```
+
+
+## Fill missing values with median of each column
+```{r}
+estimated_cell_proportions_imputed <- missMethods::impute_median(estimated_cell_proportions)
+
+# Add names of samples
+rownames(estimated_cell_proportions_imputed) <- colnames(microRNA_data)
+estimated_cell_proportions <- estimated_cell_proportions_imputed
+```
+
+
+
+## Correct microRNA-seq data for the estimated cell type proportions
+```{r}
+microrna_seq_correct <- resid(lm(t(microRNA_data) ~  estimated_cell_proportions$Blood.T.CD3 +
+                                        estimated_cell_proportions$Blood.T.CD4 +
+                                        estimated_cell_proportions$Blood.T.CD8 +
+                                        estimated_cell_proportions$Blood.T.CenMem.CD4 +
+                                        estimated_cell_proportions$Blood.T.Eff.CD8 +
+                                        estimated_cell_proportions$Blood.T.EffMem.CD8 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD4 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD8 +
+                                        estimated_cell_proportions$Blood.NK +
+                                        estimated_cell_proportions$Blood.Monocytes +
+                                        estimated_cell_proportions$Blood.Granulocytes +
+                                        estimated_cell_proportions$Blood.B +
+                                        estimated_cell_proportions$Blood.B.Mem))
+
+microrna_seq_correct <- t(data.frame(microrna_seq_correct))
+```
+
+## Plot differences
+```{r}
+library(ggplot2)
+library(reshape2)
+microRNA_melted <- melt(microRNA_data)
+colnames(microRNA_melted) <-c('Sample_ID', 'Normalized_cpm_count')
+ggplot(microRNA_melted) +
+  geom_boxplot(aes(x=Sample_ID, y=Normalized_cpm_count)) +
+  theme(axis.text.x=element_blank()) +
+  ggtitle('Un-adjusted for cell-types')
+
+corrected_melted <- melt(microrna_seq_correct)
+colnames(corrected_melted) <-c('Transcript', 'Sample_ID', 'Normalized_cpm_count')
+ggplot(corrected_melted) +
+  geom_boxplot(aes(x=Sample_ID, y=Normalized_cpm_count)) +
+  theme(axis.text.x=element_blank()) +
+  ggtitle('Adjusted for cell-types')
+```
+
+
+## Save corrected data to CSV
+```{r}
+write.csv(microrna_seq_correct, file='Z:/omics/microRNAseq_FIMM/miRBase_mature/mature_Log_Combat_CovSex_corrected.csv')
+```
+
+
+

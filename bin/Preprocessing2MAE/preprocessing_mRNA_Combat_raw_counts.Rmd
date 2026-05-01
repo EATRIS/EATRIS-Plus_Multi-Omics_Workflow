@@ -1,0 +1,271 @@
+---
+title: 'Perform mRNA data preprocessing (batch correction on raw counts)'
+author:
+- Casper de Visser^[Radboud university medical center, Casper.deVisser@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### File paths
+```{r}
+mRNA_df_path <- 'Z:/omics/mRNAseq_FIMM/gene-counts.txt'
+mRNA_metadata_path <- 'Z:/omics/mRNAseq_FIMM/metadata.tsv'
+phenotype_file <- "Z:/omics/Phenotype/phenotypes_from_phenopackets_2022-12-01.csv"
+anno_file <- 'Z:/omics/mRNAseq_FIMM/gene-annotation.tsv' 
+```
+
+### Read annotationfile
+```{r}
+anno <- read.table(anno_file, sep='\t', header=T)
+```
+
+### Read mRNA data into dataframe
+
+```{r}
+mRNA_df <- read.csv(mRNA_df_path, sep = "\t", row.names=1)
+mRNA_df <- mRNA_df[, 1:92]
+colnames(mRNA_df) <- gsub("X", "CZC", colnames(mRNA_df))
+
+```
+
+
+
+### Read metadata
+
+```{r}
+mRNA_metadata_df <- read.csv(mRNA_metadata_path, row.names='Sample', sep='\t')
+rownames(mRNA_metadata_df) <- gsub("X", "CZC", rownames(mRNA_metadata_df))
+mRNA_metadata_df$subject.id <- factor(rownames(mRNA_metadata_df))
+mRNA_metadata_df <- mRNA_metadata_df[colnames(mRNA_df), ]
+
+```
+
+### Phenotype data
+
+Read phenotype information from Phenopackets json file.
+
+```{r}
+pheno_df <- read.csv(phenotype_file)
+row.names(pheno_df) <- pheno_df$subject.id
+cat("Column names of pheno_df")
+print(names(pheno_df))
+cat("Dimensions of pheno_df")
+dim(pheno_df)
+```
+
+Convert selected columns to factor
+
+```{r}
+pheno_factor_columns <- c("subject.id", "Sex", "Smoking.Status", 
+                          "ABO.Blood.Group", "Rh.Blood.Group", 
+                          "PhenotypicFeature", "Age.group", "BMI.group")
+pheno_df[, pheno_factor_columns] <- lapply(
+  pheno_df[, pheno_factor_columns], factor)
+pheno_df$BMI.group <- factor(
+  pheno_df$BMI.group, levels = c("healthy", "overweight", "obese"), 
+  ordered = TRUE)
+```
+
+Remove samples that are not in mRNA data
+
+```{r}
+pheno_df <- pheno_df[colnames(mRNA_df), ]
+```
+
+
+## Batch effect correction with Combat
+```{r}
+library(sva)
+citation("sva")
+```
+
+## Batch effect correction 
+
+```{r}
+cat("non-parametric / sex as covariate\n")
+adjusted <- ComBat_seq(as.matrix(mRNA_df), batch= mRNA_metadata_df$Group, group=pheno_df$Sex)
+```
+
+
+## EdgeR
+
+```{r}
+count_dge <- edgeR::DGEList(counts = adjusted, genes = anno)
+count_dge <- edgeR::calcNormFactors(count_dge)
+count_dge$samples$group <- pheno_df$Sex
+count_dge$samples
+```
+
+## Filter low expressed transripts
+``` {r}
+keep <- edgeR::filterByExpr(count_dge, group=count_dge$samples$group)
+count_dge_filtered <- count_dge[keep, , keep.lib.sizes=FALSE]
+```
+
+
+```{r}
+norm_counts <- edgeR::cpm(count_dge_filtered, normalized.lib.sizes=TRUE, log=TRUE)
+dim(norm_counts)
+head(norm_counts)
+``` 
+
+
+```{r}
+#estimated_cell_proportions <- read.csv('Z:/omics/mRNAseq_FIMM/estimated_cell_proportions.csv', row.names = 1)
+estimated_cell_proportions <- readRDS('Z:/omics/EM-seq_UU/analysis/scripts/cell_type_composition.RDS')
+
+# Remove erythrocyte column
+estimated_cell_proportions <- data.frame(estimated_cell_proportions[, 2:15])
+
+# Subset samples
+estimated_cell_proportions <- estimated_cell_proportions[colnames(norm_counts),]
+```
+
+
+## Fill missing values with median of each column
+```{r}
+estimated_cell_proportions_imputed <- missMethods::impute_median(estimated_cell_proportions)
+
+# Add names of samples
+rownames(estimated_cell_proportions_imputed) <- colnames(norm_counts)
+estimated_cell_proportions <- estimated_cell_proportions_imputed
+```
+
+## Correct microRNA-seq data for the estimated cell type proportions
+
+```{r}
+# 
+mrna_seq_correct <- resid(lm(t(norm_counts) ~ estimated_cell_proportions$Blood.T.CD3 +
+                                        estimated_cell_proportions$Blood.T.CD4 +
+                                        estimated_cell_proportions$Blood.T.CD8 +
+                                        estimated_cell_proportions$Blood.T.CenMem.CD4 +
+                                        estimated_cell_proportions$Blood.T.Eff.CD8 +
+                                        estimated_cell_proportions$Blood.T.EffMem.CD8 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD4 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD8 +
+                                        estimated_cell_proportions$Blood.NK +
+                                        estimated_cell_proportions$Blood.Monocytes +
+                                        estimated_cell_proportions$Blood.Granulocytes +
+                                        estimated_cell_proportions$Blood.B +
+                                        estimated_cell_proportions$Blood.B.Mem))
+
+mrna_seq_correct <- t(data.frame(mrna_seq_correct))
+```
+
+## Plot differences
+```{r}
+# boxplot(norm_counts)
+boxplot(mrna_seq_correct)
+# boxplot(scale(mrna_seq_correct))
+# boxplot(-log(mrna_seq_correct))
+```
+
+
+## Write to CSV
+
+```{r}
+write.csv(t(norm_counts), 'Z:/omics/mRNAseq_FIMM/raw_counts_CombatSeq_cpm.csv')
+write.csv(mrna_seq_correct, 'Z:/omics/mRNAseq_FIMM/raw_counts_CombatSeq_cpm_corrected.csv')
+```
+
+
+
+
+# Deseq2
+```{r}
+library(DESeq2)
+
+
+dds <- DESeqDataSetFromMatrix(countData = adjusted, colData = pheno_df, design = ~ Sex)
+
+dds <- DESeq(dds)
+
+smallest_groupsize <- 5
+keep <- rowSums(counts(dds) >= 15) >= smallest_groupsize
+dds <- dds[keep,]
+
+vst <- vst(dds, blind = FALSE)
+
+#data_rlog <- rlog(dds, blind=FALSE)
+
+dim(assay(vst))
+```
+
+
+## Save to .csv
+```{r}
+vst_data <- assay(vst)
+write.csv(vst_data, 'Z:/omics/mRNAseq_FIMM/raw_counts_Deseq_vst.csv')
+
+#data_rlog <- assay(data_rlog)
+#write.csv(data_rlog, 'Z:/omics/mRNAseq_FIMM/raw_counts_Deseq_rlog.csv')
+```
+
+
+
+### Cell type correct data preprocessed with DeSeq2
+```{r}
+corrected_vst_data <- resid(lm(t(vst_data) ~ estimated_cell_proportions$Blood.T.CD3 +
+                                        estimated_cell_proportions$Blood.T.CD4 +
+                                        estimated_cell_proportions$Blood.T.CD8 +
+                                        estimated_cell_proportions$Blood.T.CenMem.CD4 +
+                                        estimated_cell_proportions$Blood.T.Eff.CD8 +
+                                        estimated_cell_proportions$Blood.T.EffMem.CD8 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD4 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD8 +
+                                        estimated_cell_proportions$Blood.NK +
+                                        estimated_cell_proportions$Blood.Monocytes +
+                                        estimated_cell_proportions$Blood.Granulocytes +
+                                        estimated_cell_proportions$Blood.B +
+                                        estimated_cell_proportions$Blood.B.Mem))
+
+# residuals <- resid(fit)
+# corrected_vst_data <- t(vst_data) - residuals
+
+
+boxplot(t(corrected_vst_data))
+```
+
+
+### Cell type correct data preprocessed with DeSeq2 ( rlog() )
+```{r}
+corrected_rlog_data <- resid(lm(t(data_rlog) ~ estimated_cell_proportions$Blood.T.CD3 +
+                                        estimated_cell_proportions$Blood.T.CD4 +
+                                        estimated_cell_proportions$Blood.T.CD8 +
+                                        estimated_cell_proportions$Blood.T.CenMem.CD4 +
+                                        estimated_cell_proportions$Blood.T.Eff.CD8 +
+                                        estimated_cell_proportions$Blood.T.EffMem.CD8 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD4 +
+                                        estimated_cell_proportions$Blood.T.Naive.CD8 +
+                                        estimated_cell_proportions$Blood.NK +
+                                        estimated_cell_proportions$Blood.Monocytes +
+                                        estimated_cell_proportions$Blood.Granulocytes +
+                                        estimated_cell_proportions$Blood.B +
+                                        estimated_cell_proportions$Blood.B.Mem))
+
+# residuals <- resid(fit)
+# corrected_vst_data <- t(vst_data) - residuals
+
+
+boxplot(t(corrected_rlog_data))
+```
+
+
+
+
+## Write DeSeq2 Corrected to csv
+```{r}
+write.csv(t(corrected_vst_data), 'Z:/omics/mRNAseq_FIMM/raw_counts_DeSeq_vst_corrected.csv')
+
+#write.csv(corrected_rlog_data, 'Z:/omics/mRNAseq_FIMM/raw_counts_DeSeq_rlog_corrected.csv')
+```
+
+
+
