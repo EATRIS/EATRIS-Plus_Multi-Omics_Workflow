@@ -48,6 +48,9 @@ nextflow run main.nf
 ```
 
 
+## Omics data pre-processing
+The R scripts used to process the omics data before generating the MAE object and analysis can be found [here](EATRIS-Plus_Multi-Omics_Workflow\bin\Preprocessing2MAE).  
+
 ## Run time
 This workflow was tested on a Linux environment with 16 CPU cores and 32 GB RAM available.
 For this hardware, the run times recorded for the individual Nextflow processes are documented [here](/RunTest/execution_trace_2025-12-05.txt)
