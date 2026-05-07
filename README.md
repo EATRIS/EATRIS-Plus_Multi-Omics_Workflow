@@ -49,7 +49,7 @@ nextflow run main.nf
 
 
 ## Omics data pre-processing
-The R scripts used to process the omics data before generating the MAE object and analysis can be found [here](bin\Preprocessing2MAE).  
+The R scripts used to process the omics data before generating the MAE object and analysis can be found [here](bin/Preprocessing2MAE).  
 
 ## Run time
 This workflow was tested on a Linux environment with 16 CPU cores and 32 GB RAM available.
