@@ -1,0 +1,368 @@
+---
+title: 'Robust linear models -- preprocessed single omics data'
+author:
+  - Casper de Visser^[Radboud university medical center, Anna.Niehues@radboudumc.nl]
+output:
+  html_document:
+    toc: true
+    df_print: paged
+params:
+  config_file: NULL
+  references: NULL
+  mae_hdf5_dir_path: NULL
+---
+
+This R notebook performs robust linear modeling per omics feature (molecualr entity). Robust models [@Huber1981;@Hampel1986;@Marazzi1993;@Venables2022] are implemented using the *R* package `MASS` [@Venables2022].
+
+```{r}
+if (paste0(R.Version()$major, ".", R.Version()$minor) != "4.2.1") {
+  warning("This R notebook was implemented using R version 4.2.1")
+}
+print(params)
+config <- yaml::read_yaml(params$config)
+outdir <- config$output_directory$RLM
+dir.create(outdir)
+```
+
+## Read data and metadata: MultiAssayExperiment
+
+The `MultiAssayExperiment` contains preprocessed data and has been created with the R notebook https://gitlab.cmbi.umcn.nl/eatris-plus/mtblm_data_preparation/-/blob/main/R_data_preprocessing/preprocessing_targeted_metabolomics_data/Rmd. Specific assays/experiments used in this analysis are defined below.
+
+```{r read_multiassayexperiment}
+library(MultiAssayExperiment)
+
+mae <- loadHDF5MultiAssayExperiment(
+  dir = config$mae_hdf5_dir_path, 
+  prefix = config$mae_hdf5_prefix)
+mae
+```
+
+
+Select assays for analysis
+```{r}
+## Get omics names list
+assay_names <- config$experiment_names$RLM
+
+# Mapping of original to readable names
+assay_name_map <- config$readable_names
+
+# Translate assay names using the map
+shorter_assay_names <- sapply(assay_names, function(x) {
+  if (!is.null(assay_name_map[[x]])) {
+    assay_name_map[[x]]
+  } else {
+    x  # fallback to original name
+  }
+})
+
+
+# Create a data frame for reference
+assay_names_df <- data.frame(
+  original = assay_names,
+  readable = shorter_assay_names,
+  stringsAsFactors = FALSE
+)
+```
+
+
+```{r}
+library(MASS)
+library(sfsmisc)
+```
+
+
+## RMSE of examples for manuscript
+```{r}
+run_rlm_df <- function(feature, df, outcome, covariates = NULL) {
+    # run rlm for one feature and one outcome
+    df$y <- df[[feature]]
+    # define formula
+    covar_term <- ""
+    if (!is.null(covariates)) {
+      covar_term <- paste0(" + ", paste0(covariates, collapse = " + "))}
+    str_formula <- paste0("y ~ ", outcome, covar_term)
+    my_formula <- as.formula(str_formula)
+    # fit robust regression model
+    rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+    if (length(rlm_fit) < 2) {
+      message("MASS::rlm error: ", feature, ", ", str_formula)
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = NA, 
+        std.error = NA,
+        t.value = NA,
+        p.value = NA)
+    } else {
+      # robust F-test - Wald test for multiple coefficients of rlm object
+      f_test <- f.robftest(rlm_fit, var = 2) # 1=intercept, 3:=covariates
+      # results
+      rlm_results = data.frame(
+        feature = feature,
+        outcome = outcome,
+        formula = str_formula,
+        covariates = paste0(covariates, collapse = "+"),
+        coefficient = summary(rlm_fit)$coefficients[2, "Value"], 
+        std.error = summary(rlm_fit)$coefficients[2, "Std. Error"],
+        t.value = summary(rlm_fit)$coefficients[2, "t value"],
+        p.value = f_test$p.value)
+    }
+}
+```
+
+
+## Tigclycarnitine
+```{r}
+se <- mae[["Acylcarnitines | batch-adjusted | with missing values"]]
+df = as.data.frame(t(assays(se)[[1]]))
+df <- cbind(df, colData(mae)[rownames(df), ]) 
+outcome = 'ABO.Blood.Group'
+covariates =  NULL
+feature <- "Tiglylcarnitine"
+
+df$y <- df[,feature]
+str_formula <- paste0("y ~ ", outcome, NULL)
+my_formula <- as.formula(str_formula)
+model <- rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+residuals <- resid(model)
+sqrt(mean(residuals^2))
+
+```
+
+```{r}
+se <- mae[["Amino acids | batch-adjusted | with missing values"]]
+df = as.data.frame(t(assays(se)[[1]]))
+df <- cbind(df, colData(mae)[rownames(df), ]) 
+outcome = 'Sex'
+covariates =  NULL
+feature <- "O-Phosphoethanolamine"
+
+df$y <- df[,feature]
+str_formula <- paste0("y ~ ", outcome, NULL)
+my_formula <- as.formula(str_formula)
+model <- rlm_fit <- try(rlm(formula = my_formula, data = df, maxit = 50))
+residuals <- resid(model)
+sqrt(mean(residuals^2))
+```
+# Power analysis (aging features as examples)
+```{r}
+library(pwr)
+library(ggplot2)
+```
+
+
+Plot function for smaller cohort sizes
+```{r}
+plot_power_curve <- function(
+    mae,
+    assay_name,
+    outcome,
+    feature,
+    covariates = NULL,
+    alpha = 0.05,
+    sample_seq = NULL,
+    min_n = 20,
+    by = 5,
+    return_data = FALSE
+) {
+
+    # extract assay
+    se <- mae[[assay_name]]
+
+    # build dataframe
+    df <- as.data.frame(t(assays(se)[[1]]))
+    df <- cbind(df, colData(mae)[rownames(df), ])
+
+    # response variable
+    df$y <- df[, feature]
+
+    # build formula
+    covar_term <- ""
+
+    if (!is.null(covariates)) {
+        covar_term <- paste0(
+            " + ",
+            paste0(covariates, collapse = " + ")
+        )
+    }
+
+    str_formula <- paste0(
+        "y ~ ",
+        outcome,
+        covar_term
+    )
+
+    my_formula <- as.formula(str_formula)
+
+    # fit linear model
+    lm_fit <- lm(my_formula, data = df)
+
+    # effect size
+    R2 <- summary(lm_fit)$r.squared
+    f2 <- R2 / (1 - R2)
+
+    # number of predictors
+    u <- 1
+
+    if (!is.null(covariates)) {
+        u <- u + length(covariates)
+    }
+
+    # sample sizes
+    if (is.null(sample_seq)) {
+        sample_sizes <- c(
+            seq(min_n, nrow(df), by = by),
+            nrow(df)
+        )
+
+        sample_sizes <- unique(sample_sizes)
+    } else {
+        sample_sizes <- sample_seq
+    }
+
+    # compute power
+    powers <- sapply(sample_sizes, function(n) {
+
+        v <- n - u - 1
+
+        pwr.f2.test(
+            u = u,
+            v = v,
+            f2 = f2,
+            sig.level = alpha
+        )$power
+    })
+
+    # dataframe for plotting
+    power_df <- data.frame(
+        sample_size = sample_sizes,
+        power = powers
+    )
+
+    # plot
+    p <- ggplot(power_df,
+                aes(x = sample_size,
+                    y = power)) +
+
+        geom_line(linewidth = 1.2) +
+
+        geom_hline(
+            yintercept = 0.80,
+            linetype = "dashed"
+        ) +
+
+        coord_cartesian(ylim = c(0,1)) +
+
+        labs(
+            x = "Sample size",
+            y = "Statistical power",
+            title = paste0(outcome, " ~ ", feature),
+            subtitle = assay_name
+        ) +
+
+        theme_bw(base_size = 13) +
+
+        theme(
+            plot.title = element_text(face = "bold"),
+            axis.title = element_text(face = "bold")
+        )
+
+    # return
+    if (return_data) {
+
+        return(list(
+            plot = p,
+            power_df = power_df,
+            lm_fit = lm_fit,
+            R2 = R2,
+            f2 = f2
+        ))
+
+    } else {
+
+        return(p)
+    }
+}
+```
+
+
+## Examples for biomarkers of biological age
+```{r}
+p <- plot_power_curve(
+  mae = mae,
+  assay_name = "miRNA-seq, mature | batch-adjusted | corrected",
+  outcome = 'Age_pred_Levine', 
+  feature = "hsa.miR.6876.3p_MIMAT0027653_Homo_sapiens_miR.6876.3p",
+)
+file.out <- file.path(outdir, 'miRNAseq_AgePredLevine_miR-6876-3p.pdf')
+ggsave(filename = file.out, p, width = 8, height = 5.5)
+```
+
+```{r}
+p <- plot_power_curve(
+  mae = mae,
+  assay_name = "Lipidomics, positive | transformed",
+  outcome = 'Age_acc_Levine', 
+  feature = "M637T785",
+)
+file.out <- file.path(outdir, 'Lipid_AgeAccLevine_M637T785.pdf')
+ggsave(filename = file.out, p, width = 8, height = 5.5)
+```
+
+```{r}
+p <- plot_power_curve(
+  mae = mae,
+  assay_name = "Proteomics | imputed missing values",
+  outcome = 'Age_acc_BLUP', 
+  feature = "A0A5C2GF79",
+)
+file.out <- file.path(outdir, 'Prot_AgeAccBLUP_A0A5C2GF79.pdf')
+ggsave(filename = file.out, p, width = 8, height = 5.5)
+```
+
+
+## Examples of miRNAs from Huan et al. (2017)
+```{r}
+p <- plot_power_curve(
+  mae = mae,
+  assay_name = "miRNA-seq, mature | batch-adjusted | corrected",
+  outcome = 'Age', 
+  feature = "hsa.miR.99b.5p_MIMAT0000689_Homo_sapiens_miR.99b.5p",
+)
+file.out <- file.path(outdir, 'miRNAseq_ChronAge_miR-99b-5p.pdf')
+ggsave(filename = file.out, p, width = 8, height = 5.5)
+```
+
+```{r}
+p <- plot_power_curve(
+  mae = mae,
+  assay_name = "miRNA-seq, mature | batch-adjusted | corrected",
+  outcome = 'Age', 
+  feature = "hsa.miR.130b.5p_MIMAT0004680_Homo_sapiens_miR.130b.5p",
+)
+file.out <- file.path(outdir, 'miRNAseq_ChronAge_miR-130b-5p.pdf')
+ggsave(filename = file.out, p, width = 8, height = 5.5)
+```
+
+```{r}
+p <- plot_power_curve(
+  mae = mae,
+  assay_name = "miRNA-seq, mature | batch-adjusted | corrected",
+  outcome = 'Age', 
+  feature = "hsa.miR.302c.3p_MIMAT0000717_Homo_sapiens_miR.302c.3p",
+)
+file.out <- file.path(outdir, 'miRNAseq_ChronAge_miR-302c-3p.pdf')
+ggsave(filename = file.out, p, width = 8, height = 5.5)
+```
+
+
+## Session information
+
+```{r}
+sessionInfo()
+```
+
+## References
+
